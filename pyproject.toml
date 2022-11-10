@@ -23,3 +23,15 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/ilastik/fastfilters2"
 "Bug Tracker" = "https://github.com/ilastik/fastfilters2/issues"
+
+[tool.cibuildwheel]
+build = "cp*"
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64"]
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "universal2", "arm64"]
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]
