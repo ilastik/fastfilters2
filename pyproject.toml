@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "scikit-build"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastfilters2"
+version = "2.0.dev0"
+description = "SIMD-accelerated 2D and 3D image features"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT License" }
+authors = [
+    { name = "Emil Melnikov", email = "emilmelnikov@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "numpy",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/ilastik/fastfilters2"
+"Bug Tracker" = "https://github.com/ilastik/fastfilters2/issues"
