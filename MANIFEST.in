@@ -1,2 +1,4 @@
 graft cpp
 include CMakeLists.txt
+graft tests
+global-exclude *.py[cod]
