@@ -19,8 +19,11 @@ pip install --editable .
 # Configure CMake build.
 cmake --preset dev
 
-# Build: this needs to be run when C++ source files change.
-cmake --build --preset dev
+# Build and run benchmarks: this needs to be run when C++ source files change.
+cmake --build --preset dev.bm
+
+# Build and install Python module: this needs to be run when C++ source files change.
+cmake --build --preset dev.install
 ```
 
 [mambaforge]: https://github.com/conda-forge/miniforge#mambaforge
