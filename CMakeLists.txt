@@ -48,14 +48,16 @@ pybind11_add_module(_core cpp/_core.cpp)
 target_link_libraries(_core PRIVATE fastfilters2)
 install(TARGETS _core DESTINATION fastfilters2)
 
-add_executable(bm cpp/benchmark.cpp)
-target_link_libraries(bm PRIVATE fastfilters2 benchmark::benchmark)
-add_custom_target(
-    runbm
-    "$<TARGET_FILE:bm>"
-    DEPENDS bm
-    WORKING_DIRECTORY ${bm_BINARY_DIR}
-    VERBATIM
-    USES_TERMINAL
-    COMMAND_EXPAND_LISTS
-)
+if(FASTFILTERS2_BENCHMARK)
+    add_executable(bm cpp/benchmark.cpp)
+    target_link_libraries(bm PRIVATE fastfilters2 benchmark::benchmark)
+    add_custom_target(
+        runbm
+        "$<TARGET_FILE:bm>"
+        DEPENDS bm
+        WORKING_DIRECTORY ${bm_BINARY_DIR}
+        VERBATIM
+        USES_TERMINAL
+        COMMAND_EXPAND_LISTS
+    )
+endif()
