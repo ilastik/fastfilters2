@@ -5,12 +5,20 @@
             "name": "dev",
             "generator": "Ninja",
             "binaryDir": "build",
-            "installDir": "src"
+            "installDir": "src",
+            "cacheVariables": {
+                "FASTFILTERS2_BENCHMARK": "ON"
+            }
         }
     ],
     "buildPresets": [
         {
-            "name": "dev",
+            "name": "dev.bm",
+            "configurePreset": "dev",
+            "targets": ["runbm"]
+        },
+        {
+            "name": "dev.install",
             "configurePreset": "dev",
             "targets": ["install"]
         }
