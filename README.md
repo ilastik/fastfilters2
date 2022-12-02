@@ -26,4 +26,15 @@ cmake --build --preset dev.bm
 cmake --build --preset dev.install
 ```
 
+## Guides
+
+### Add a new submodule dependency
+
+```sh
+git submodule add --name REPO https://github.com/OWNER/REPO.git deps/REPO
+git -C deps/REPO switch --detach TAG
+git add .
+git commit --message
+```
+
 [mambaforge]: https://github.com/conda-forge/miniforge#mambaforge

@@ -10,23 +10,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(FASTFILTERS2_BENCHMARK "Build benchmarks")
 
-include(FetchContent)
-FetchContent_Declare(
-    highway
-    GIT_REPOSITORY https://github.com/google/highway
-    GIT_TAG 1.0.2
-    GIT_SHALLOW ON)
-FetchContent_Declare(
-    pybind11
-    GIT_REPOSITORY https://github.com/pybind/pybind11
-    GIT_TAG v2.10.1
-    GIT_SHALLOW ON)
-FetchContent_Declare(
-    benchmark
-    GIT_REPOSITORY https://github.com/google/benchmark
-    GIT_TAG v1.7.1
-    GIT_SHALLOW ON)
-
 set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "")
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "")
 set(BUILD_TESTING OFF CACHE BOOL "")
@@ -34,11 +17,11 @@ set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "")
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "")
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "")
 
-set(FASTFILTERS2_DEPENDENCIES highway pybind11)
 if(${FASTFILTERS2_BENCHMARK})
-    list(APPEND FASTFILTERS2_DEPENDENCIES benchmark)
+    add_subdirectory(deps/benchmark)
 endif()
-FetchContent_MakeAvailable(${FASTFILTERS2_DEPENDENCIES})
+add_subdirectory(deps/highway)
+add_subdirectory(deps/pybind11)
 
 add_library(fastfilters2 cpp/fastfilters2.cpp)
 target_link_libraries(fastfilters2 PRIVATE hwy)
