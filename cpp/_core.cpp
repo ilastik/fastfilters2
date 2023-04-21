@@ -8,27 +8,24 @@
 
 namespace ff = fastfilters2;
 namespace py = pybind11;
-static_assert(std::is_same_v<ff::int_t, py::ssize_t>);
+using std::size_t;
 
-py::array_t<ff::val_t> gaussian_kernel(double scale, py::ssize_t order) {
+py::array_t<float> gaussian_kernel(double scale, size_t order) {
   if (scale <= 0) {
     throw std::invalid_argument("scale should be greater than 0");
-  }
-  if (order < 0) {
-    throw std::invalid_argument("order cannot be negative");
   }
   if (order > 2) {
     throw std::invalid_argument("orders greater than 2 are not supported");
   }
 
   auto radius = ff::kernel_radius(scale, order);
-  py::array_t<ff::val_t> kernel{radius + 1};
+  py::array_t<float> kernel{static_cast<py::ssize_t>(radius) + 1};
   ff::gaussian_kernel(kernel.mutable_data(), radius, scale, order);
   return kernel;
 }
 
-py::array_t<ff::val_t> compute_filters(
-    py::array_t<ff::val_t, py::array::c_style | py::array::forcecast> data,
+py::array_t<float> compute_filters(
+    py::array_t<float, py::array::c_style | py::array::forcecast> data,
     double scale) {
 
   if (scale <= 0) {
@@ -38,14 +35,12 @@ py::array_t<ff::val_t> compute_filters(
     throw std::invalid_argument("only 2D arrays are supported");
   }
 
-  py::ssize_t size[3];
-  size[0] = 7;
-  size[1] = data.shape(0);
-  size[2] = data.shape(1);
-  py::array_t<ff::val_t> result{{size, size + 3}};
+  py::array_t<float> result{{py::ssize_t{7}, data.shape(0), data.shape(1)}};
 
-  ff::compute_filters(result.mutable_data(), data.data(), data.shape(),
-                      data.ndim(), scale);
+  size_t shape[] = {7, static_cast<size_t>(data.shape(0)),
+                    static_cast<size_t>(data.shape(1))};
+
+  ff::compute_filters(result.mutable_data(), data.data(), shape, 2, scale);
   return result;
 }
 
