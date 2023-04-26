@@ -6,25 +6,6 @@
 
 #include <hwy/aligned_allocator.h>
 
-#if defined(_MSC_VER)
-#define FASTFILTERS2_ASSUME(cond) __assume(cond)
-#elif defined(__clang__)
-#define FASTFILTERS2_ASSUME(cond) __builtin_assume(cond)
-#elif defined(__GNUC__)
-#define FASTFILTERS2_ASSUME(cond)                                              \
-  ((cond) ? static_cast<void>(0) : __builtin_unreachable())
-#else
-#define FASTFILTERS2_ASSUME(cond) static_cast<void>((cond) ? 0 : 0)
-#endif
-
-#if defined(__clang__) || defined(__GNUC__)
-#define FASTFILTERS2_LIKELY(x) __builtin_expect(!!(x), 1)
-#define FASTFILTERS2_UNLIKELY(x) __builtin_expect(!!(x), 0)
-#else
-#define FASTFILTERS2_LIKELY(x) (!!(x))
-#define FASTFILTERS2_UNLIKELY(x) (!!(x))
-#endif
-
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "fastfilters2.cpp"
 #include <hwy/foreach_target.h>
@@ -41,7 +22,7 @@ HWY_INLINE void convolve_step(hn::TFromD<D> *HWY_RESTRICT dst,
                               size_t radius, size_t llimit, size_t rlimit,
                               size_t stride) {
 
-  FASTFILTERS2_ASSUME(radius >= 1);
+  HWY_ASSUME(radius >= 1);
   if constexpr (!STRIDED) {
     static_cast<void>(llimit);
     static_cast<void>(rlimit);
