@@ -1,26 +1,81 @@
 {
-    "version": 3,
+    "version": 6,
     "configurePresets": [
         {
-            "name": "dev",
+            "name": "default",
             "generator": "Ninja",
-            "binaryDir": "build",
-            "installDir": "src",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
-                "FASTFILTERS2_BENCHMARK": "ON"
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
             }
         }
     ],
     "buildPresets": [
         {
-            "name": "dev.bm",
-            "configurePreset": "dev",
-            "targets": ["runbm"]
+            "name": "default",
+            "configurePreset": "default"
         },
         {
-            "name": "dev.install",
-            "configurePreset": "dev",
-            "targets": ["install"]
+            "name": "bench",
+            "configurePreset": "default",
+            "targets": [
+                "bench"
+            ]
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "default",
+            "configurePreset": "default",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ],
+    "workflowPresets": [
+        {
+            "name": "build",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "default"
+                },
+                {
+                    "type": "build",
+                    "name": "default"
+                }
+            ]
+        },
+        {
+            "name": "test",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "default"
+                },
+                {
+                    "type": "build",
+                    "name": "default"
+                },
+                {
+                    "type": "test",
+                    "name": "default"
+                }
+            ]
+        },
+        {
+            "name": "bench",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "default"
+                },
+                {
+                    "type": "build",
+                    "name": "bench"
+                }
+            ]
         }
     ]
 }

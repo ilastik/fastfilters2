@@ -53,6 +53,8 @@ dependencies = [
 "Bug Tracker" = "https://github.com/ilastik/fastfilters2/issues"
 
 [tool.pytest.ini_options]
+addopts = "--benchmark-disable --benchmark-group-by=param"
+python_functions = ["bench_*", "test_*"]
 testpaths = ["tests"]
 
 [tool.cibuildwheel]

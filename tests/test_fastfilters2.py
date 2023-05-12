@@ -1,6 +1,8 @@
-import fastfilters2
+import fastfilters
 import numpy
 import pytest
+
+import fastfilters2
 
 
 # Kernel values are extracted from the original fastfilters library.
@@ -36,10 +38,132 @@ KERNELS = {
     if (items := line.strip().split())
 }
 
+RNG = numpy.random.default_rng(seed=42)
 
-@pytest.mark.parametrize("scale", [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0])
+
+def random_array(shape):
+    return RNG.integers(0, 256, size=shape, dtype=numpy.uint8).astype(numpy.float32) / 255
+
+
+def idfn(val):
+    if isinstance(val, tuple):
+        return "x".join(map(str, val))
+
+
 @pytest.mark.parametrize("order", [0, 1, 2])
+@pytest.mark.parametrize("scale", [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0])
 def test_gaussian_kernel(scale, order):
     actual = fastfilters2.gaussian_kernel(scale, order=order)
     desired = KERNELS[scale, order]
     numpy.testing.assert_array_almost_equal_nulp(actual, desired)
+
+
+def test_gaussian_kernel_twosided():
+    symmetric = fastfilters2.gaussian_kernel(0.3, radius=1, order=0, twosided=True)
+    assert symmetric.shape == (3,)
+    assert symmetric[0] == symmetric[2]
+
+    antisymmetric = fastfilters2.gaussian_kernel(0.3, radius=1, order=1, twosided=True)
+    assert antisymmetric.shape == (3,)
+    assert antisymmetric[0] == -antisymmetric[2]
+
+
+@pytest.mark.parametrize("scale", [0.3, 10.0])
+@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+def test_gaussian_smoothing(shape, scale):
+    data = random_array(shape)
+    actual = fastfilters2.Filters(data, scale).gaussian_smoothing()
+    desired = fastfilters.gaussianSmoothing(data, scale)
+    numpy.testing.assert_allclose(actual, desired, atol=1e-4)
+
+
+@pytest.mark.parametrize("scale", [0.7, 10.0])
+@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+def test_gaussian_gradient_magnitude(shape, scale):
+    data = random_array(shape)
+    actual = fastfilters2.Filters(data, scale).gaussian_gradient_magnitude()
+    desired = fastfilters.gaussianGradientMagnitude(data, scale)
+    numpy.testing.assert_allclose(actual, desired, atol=1e-4)
+
+
+@pytest.mark.parametrize("scale", [0.7, 10.0])
+@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+def test_laplacian_of_gaussian(shape, scale):
+    data = random_array(shape)
+    actual = fastfilters2.Filters(data, scale).laplacian_of_gaussian()
+    desired = fastfilters.laplacianOfGaussian(data, scale)
+    numpy.testing.assert_allclose(actual, desired, atol=1e-4)
+
+
+@pytest.mark.parametrize("scale", [0.7, 10.0])
+@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+def test_laplacian_of_gaussian(shape, scale):
+    data = random_array(shape)
+    actual = fastfilters2.Filters(data, scale).hessian_of_gaussian_eigenvalues()
+    desired = fastfilters.hessianOfGaussianEigenvalues(data, scale)
+    desired = numpy.moveaxis(desired, -1, 0)
+    numpy.testing.assert_allclose(actual, desired, atol=1e-4)
+
+
+@pytest.mark.parametrize("scale", [0.7, 10.0])
+@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+def test_structure_tensor_eigenvalues(shape, scale):
+    data = random_array(shape)
+    actual = fastfilters2.Filters(data, scale).structure_tensor_eigenvalues()
+    desired = fastfilters.structureTensorEigenvalues(data, scale, 0.5 * scale)
+    desired = numpy.moveaxis(desired, -1, 0)
+    numpy.testing.assert_allclose(actual, desired, atol=1e-4)
+
+
+def ff1_all(data, scale):
+    return (
+        fastfilters.gaussianSmoothing(data, scale),
+        fastfilters.gaussianGradientMagnitude(data, scale),
+        fastfilters.laplacianOfGaussian(data, scale),
+        fastfilters.hessianOfGaussianEigenvalues(data, scale),
+        fastfilters.structureTensorEigenvalues(data, scale, 0.5 * scale),
+    )
+
+
+def ff2_all_nosharing(data, scale):
+    return (
+        fastfilters2.Filters(data, scale).gaussian_smoothing(),
+        fastfilters2.Filters(data, scale).gaussian_gradient_magnitude(),
+        fastfilters2.Filters(data, scale).laplacian_of_gaussian(),
+        fastfilters2.Filters(data, scale).hessian_of_gaussian_eigenvalues(),
+        fastfilters2.Filters(data, scale).structure_tensor_eigenvalues(),
+    )
+
+
+def ff2_all(data, scale):
+    f = fastfilters2.Filters(data, scale)
+    return (
+        f.gaussian_smoothing(),
+        f.gaussian_gradient_magnitude(),
+        f.laplacian_of_gaussian(),
+        f.hessian_of_gaussian_eigenvalues(),
+        f.structure_tensor_eigenvalues(),
+    )
+
+@pytest.mark.skip
+@pytest.mark.parametrize("scale", [0.7, 10.0])
+@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+def bench_allfilters_ff1(benchmark, shape, scale):
+    data = random_array(shape)
+    benchmark(ff1_all, data, scale)
+
+
+# @pytest.mark.skip
+@pytest.mark.parametrize("scale", [0.7, 10.0])
+@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+def bench_allfilters_ff2_nosharing(benchmark, shape, scale):
+    data = random_array(shape)
+    benchmark(ff2_all_nosharing, data, scale)
+
+
+@pytest.mark.skip
+@pytest.mark.parametrize("scale", [0.7, 10.0])
+@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+def bench_allfilters_ff2(benchmark, shape, scale):
+    data = random_array(shape)
+    benchmark(ff2_all, data, scale)
