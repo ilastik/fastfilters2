@@ -19,9 +19,7 @@
         {
             "name": "bench",
             "configurePreset": "default",
-            "targets": [
-                "bench"
-            ]
+            "targets": ["bench"]
         }
     ],
     "testPresets": [

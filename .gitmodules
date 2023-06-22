@@ -1,12 +1,6 @@
-[submodule "benchmark"]
-	path = deps/benchmark
-	url = https://github.com/google/benchmark.git
 [submodule "highway"]
 	path = deps/highway
 	url = https://github.com/google/highway.git
 [submodule "pybind11"]
 	path = deps/pybind11
 	url = https://github.com/pybind/pybind11.git
-[submodule "googletest"]
-	path = deps/googletest
-	url = https://github.com/google/googletest.git
