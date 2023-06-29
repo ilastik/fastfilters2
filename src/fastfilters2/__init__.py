@@ -1,1 +1,1 @@
-from ._core import Filters, gaussian_kernel
+from ._core import gaussian_kernel, gaussian_smoothing

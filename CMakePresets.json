@@ -1,8 +1,8 @@
 {
-    "version": 6,
+    "version": 2,
     "configurePresets": [
         {
-            "name": "default",
+            "name": "main",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
@@ -13,67 +13,8 @@
     ],
     "buildPresets": [
         {
-            "name": "default",
-            "configurePreset": "default"
-        },
-        {
-            "name": "bench",
-            "configurePreset": "default",
-            "targets": ["bench"]
-        }
-    ],
-    "testPresets": [
-        {
-            "name": "default",
-            "configurePreset": "default",
-            "output": {
-                "outputOnFailure": true
-            }
-        }
-    ],
-    "workflowPresets": [
-        {
-            "name": "build",
-            "steps": [
-                {
-                    "type": "configure",
-                    "name": "default"
-                },
-                {
-                    "type": "build",
-                    "name": "default"
-                }
-            ]
-        },
-        {
-            "name": "test",
-            "steps": [
-                {
-                    "type": "configure",
-                    "name": "default"
-                },
-                {
-                    "type": "build",
-                    "name": "default"
-                },
-                {
-                    "type": "test",
-                    "name": "default"
-                }
-            ]
-        },
-        {
-            "name": "bench",
-            "steps": [
-                {
-                    "type": "configure",
-                    "name": "default"
-                },
-                {
-                    "type": "build",
-                    "name": "bench"
-                }
-            ]
+            "name": "main",
+            "configurePreset": "main"
         }
     ]
 }

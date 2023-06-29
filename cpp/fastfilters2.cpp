@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <iostream>
 #include <numeric>
 #include <unordered_map>
 
@@ -14,12 +15,11 @@
 #define HWY_TARGET_INCLUDE "fastfilters2.cpp"
 #include <hwy/foreach_target.h>
 #include <hwy/highway.h>
+
 #include <hwy/contrib/math/math-inl.h>
 
 #ifndef VARGS
-#define VARGS                                                                                                          \
-    v00, v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, \
-            v23, v24, v25, v26, v27, v28, v29, v30, v31
+#define VARGS v00, v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15
 #endif
 
 HWY_BEFORE_NAMESPACE();
@@ -29,16 +29,36 @@ namespace hn = hwy::HWY_NAMESPACE;
 template <typename D> using pointer = hn::TFromD<D> *HWY_RESTRICT;
 template <typename D> using const_pointer = const hn::TFromD<D> *HWY_RESTRICT;
 
-template <size_t N, typename Func, typename... Args> void static_for(Func func, Args &&...args) {
-    auto call = [func](auto idx, auto &&arg) {
-        if constexpr (idx < N) {
-            func(idx, std::forward<decltype(arg)>(arg));
+// Need a helper in order to capture Is in a template parameter.
+// This could be replaced with a template lambda in C++20.
+template <size_t N, typename Func, typename... Args, size_t... Is>
+HWY_INLINE void static_for_helper(std::index_sequence<Is...>, Func func, Args &&...args) {
+    auto predicated_func = [func](auto i, auto &&arg) {
+        if constexpr (i < N) {
+            func(i, std::forward<decltype(arg)>(arg));
         }
     };
-    auto fold = [call]<size_t... Idx>(std::index_sequence<Idx...>, auto &&...args) {
-        (call(std::integral_constant<size_t, Idx>{}, std::forward<decltype(args)>(args)), ...);
-    };
-    fold(std::index_sequence_for<Args...>{}, std::forward<Args>(args)...);
+    (predicated_func(std::integral_constant<size_t, Is>{}, std::forward<Args>(args)), ...);
+}
+
+/**
+ * Apply function to the first N arguments, with guaranteed compile-time unrolling.
+ * The function recieves an integral_constant index and the corresponding argument.
+ */
+template <size_t N, typename Func, typename... Args> HWY_INLINE void static_for(Func func, Args &&...args) {
+    static_assert(N <= sizeof...(Args), "N must be less than or equal to the number of arguments");
+    static_for_helper<N>(std::index_sequence_for<Args...>{}, func, std::forward<Args>(args)...);
+}
+
+/**
+ * Copy src to dst, reflecting the first and last radius elements except for the first and last element.
+ * Return pointer to the first unreflected element in dst.
+ */
+template <typename T> T *reflect_copy(T *HWY_RESTRICT dst, const T *HWY_RESTRICT src, size_t size, size_t radius) {
+    std::reverse_copy(src + 1, src + 1 + radius, dst);
+    std::copy(src, src + size, dst);
+    std::reverse_copy(src + size - 1 - radius, src + size - 1, dst + radius + size);
+    return dst + radius;
 }
 
 template <typename D, size_t Unroll, bool Symmetric>
@@ -83,6 +103,109 @@ void dot_product(pointer<D> dst,
     static_for<Unroll>([&](auto i, const auto &v) { hn::StoreU(v, d, dst + i * lanes); }, VARGS);
 }
 
+template <typename D, size_t Unroll, bool Symmetric> struct conv_context {
+    using ptr = const hn::TFromD<D> *HWY_RESTRICT;
+    using mut_ptr = hn::TFromD<D> *HWY_RESTRICT;
+
+    shape_type shape;
+    ptr kernel;
+    size_t radius;
+    mut_ptr buf;
+
+    D d;
+    size_t lanes = hn::Lanes(d);
+    size_t step = Unroll * lanes;
+
+    /**
+     * Convolve a group of consecutive lanes.
+     */
+    void conv_lane_batch(mut_ptr dst, ptr src, size_t stride, size_t lborder, size_t rborder) {
+        HWY_ASSUME(radius > 0);
+
+        auto kvec = hn::Set(d, kernel[0]);
+        hn::VFromD<D> VARGS;
+
+        static_for<Unroll>([&](auto i, auto &v) { v = hn::Mul(hn::LoadU(d, src + i * lanes), kvec); }, VARGS);
+
+        auto lsrc = src;
+        auto rsrc = src;
+
+        for (size_t k = 1; k <= radius; ++k) {
+            kvec = hn::Set(d, kernel[k]);
+            lsrc = k <= lborder ? lsrc - stride : lsrc + stride;
+            rsrc = k <= rborder ? rsrc + stride : rsrc - stride;
+
+            static_for<Unroll>(
+                    [&](auto i, auto &v) {
+                        auto lvec = hn::LoadU(d, lsrc + i * lanes);
+                        auto rvec = hn::LoadU(d, rsrc + i * lanes);
+                        if constexpr (Symmetric) {
+                            v = hn::MulAdd(hn::Add(rvec, lvec), kvec, v);
+                        } else {
+                            v = hn::MulAdd(hn::Sub(rvec, lvec), kvec, v);
+                        }
+                    },
+                    VARGS);
+        }
+
+        static_for<Unroll>([&](auto i, const auto &v) { hn::StoreU(v, d, dst + i * lanes); }, VARGS);
+    }
+
+    /**
+     * Convolve single memory-contiguous line.
+     */
+    void conv_line_contig(mut_ptr dst, ptr src, size_t size) {
+        src = reflect_copy(buf, src, size, radius);
+        for (size_t i = 0; i < size; i += step) {
+            i = HWY_MIN(i, size - step);
+            conv_lane_batch(dst + i, src + i, 1, radius, radius);
+        }
+    }
+
+    /**
+     * Convolve multiple strided lines.
+     */
+    void conv_line_strided(mut_ptr dst, ptr src, size_t size, size_t stride) {
+        for (size_t i = 0; i < size; ++i) {
+            conv_lane_batch(dst + i, src + i, stride, i, size - 1 - i);
+        }
+    }
+
+    /**
+     * Convolve a plane of multiple strided lines.
+     */
+    void conv_plane(mut_ptr dst, ptr src, size_t size_contig, size_t size_strided, size_t stride) {
+        for (size_t i = 0; i < size_contig; i += step) {
+            i = HWY_MIN(i, size_contig - step);
+            conv_line_strided(dst + i, src + i, size_strided, stride);
+        }
+    }
+
+    void conv_x(mut_ptr dst, ptr src) {
+        for (size_t i = 0; i < shape[2] * shape[1]; ++i) {
+            conv_line_contig(dst, src, shape[0]);
+            dst += shape[0];
+            src += shape[0];
+        }
+    }
+
+    void conv_y(mut_ptr dst, ptr src) {
+        for (size_t i = 0; i < shape[2]; ++i) {
+            conv_plane(dst, src, shape[0], shape[1], shape[0]);
+            dst += shape[0] * shape[1];
+            src += shape[0] * shape[1];
+        }
+    }
+
+    void conv_z(mut_ptr dst, ptr src) {
+        for (size_t i = 0; i < shape[1]; ++i) {
+            conv_plane(dst, src, shape[0], shape[2], shape[0] * shape[1]);
+            dst += shape[0];
+            src += shape[0];
+        }
+    }
+};
+
 template <typename D> void mirror_copy(pointer<D> dst, const_pointer<D> src, size_t size, size_t radius) {
     std::reverse_copy(src + 1, src + 1 + radius, dst);
     std::copy(src, src + size, dst + radius);
@@ -99,12 +222,12 @@ void convolve_x(pointer<D> dst,
 
     auto step = Unroll * hn::Lanes(D{});
     auto ostride = shape[0];
-    auto istride = 1;
+    constexpr size_t istride = 1;
 
     for (size_t zy = 0; zy < shape[2] * shape[1]; ++zy) {
         mirror_copy<D>(buf, src, shape[0], radius);
         for (size_t x = 0; x < shape[0]; x += step) {
-            // x = HWY_MIN(x, shape[0] - step);
+            x = HWY_MIN(x, shape[0] - step);
             dot_product<D, Unroll, Symmetric>(dst + x, buf + radius + x, kernel, radius, istride, radius, radius);
         }
         dst += ostride;
@@ -126,7 +249,7 @@ void convolve_y(pointer<D> dst,
 
     for (size_t z = 0; z < shape[2]; ++z) {
         for (size_t x = 0; x < shape[0]; x += step) {
-            // x = HWY_MIN(x, shape[0] - step);
+            x = HWY_MIN(x, shape[0] - step);
             auto i = x;
             for (size_t y = 0; y < shape[1]; ++y) {
                 dot_product<D, Unroll, Symmetric>(dst + i, src + i, kernel, radius, istride, y, shape[1] - 1 - y);
@@ -152,7 +275,7 @@ void convolve_z(pointer<D> dst,
 
     for (size_t y = 0; y < shape[1]; ++y) {
         for (size_t x = 0; x < shape[0]; x += step) {
-            // x = HWY_MIN(x, shape[0] - step);
+            x = HWY_MIN(x, shape[0] - step);
             auto i = x;
             for (size_t z = 0; z < shape[2]; ++z) {
                 dot_product<D, Unroll, Symmetric>(dst + i, src + i, kernel, radius, istride, z, shape[2] - 1 - z);
@@ -164,9 +287,8 @@ void convolve_z(pointer<D> dst,
     }
 }
 
+// Implementation adapted from https://mazzo.li/posts/vectorized-atan2.html
 template <typename D, typename V> HWY_INLINE V Atan2(D d, V y, V x) {
-    // Implementation adapted from https://mazzo.li/posts/vectorized-atan2.html
-
     auto pi = hn::Set(d, 3.141592653589793);
     auto halfpi = hn::Set(d, 1.5707963267948966);
 
@@ -182,7 +304,7 @@ template <typename D, typename V> HWY_INLINE V Atan2(D d, V y, V x) {
 using D = hn::CappedTag<float, 16>;
 constexpr size_t Unroll = 8;
 
-size_t batch_size() { return Unroll * hn::Lanes(D{}); }
+size_t min_size() { return Unroll * hn::Lanes(D{}); }
 
 pointer<D> convolve(size_t dim,
                     size_t order,
@@ -402,7 +524,7 @@ HWY_AFTER_NAMESPACE();
 
 #if HWY_ONCE
 namespace fastfilters2 {
-HWY_EXPORT(batch_size);
+HWY_EXPORT(min_size);
 HWY_EXPORT(convolve);
 HWY_EXPORT(add);
 HWY_EXPORT(mul);
@@ -462,270 +584,96 @@ void gaussian_kernel(float *kernel, size_t radius, double scale, size_t order) {
     std::transform(begin, end, begin, std::bind(std::multiplies{}, _1, 1 / sum));
 }
 
-struct filters::impl {
-    impl(const float *data, shape_type shape, size_t ndim, double scale) : shape{shape}, ndim{ndim}, scale{scale} {
-        // Round up line_size to a multiple of batch size, which is always a non-zero power of 2.
-        auto batch_size = HWY_DYNAMIC_DISPATCH(batch_size)();
-        line_size = (shape[0] + batch_size - 1) & -batch_size;
+struct context {
+    const float *src_;
+    shape_type shape;
+    size_t total;
+    size_t radius[3];
+    hwy::AlignedFreeUniquePtr<float[]> kernel[3];
+    hwy::AlignedFreeUniquePtr<float[]> buf;
+    std::vector<hwy::AlignedFreeUniquePtr<float[]>> tmp;
 
-        size = line_size * shape[1] * shape[2];
-
+    context(const float *src, shape_type shape, double scale)
+            : src_{src}, shape{shape}, total{shape[0] * shape[1] * shape[2]} {
         for (size_t order = 0; order < 3; ++order) {
             radius[order] = kernel_radius(scale, order);
             kernel[order] = hwy::AllocateAligned<float>(radius[order] + 1);
             gaussian_kernel(kernel[order].get(), radius[order], scale, order);
         }
-
-        buf = hwy::AllocateAligned<float>(HWY_MAX(size, line_size + 2 * radius[2]));
-
-        auto dst = conv<>();
-        for (size_t zy = 0; zy < shape[2] * shape[1]; ++zy) {
-            std::copy_n(data, shape[0], dst);
-            std::fill(dst + shape[0], dst + line_size, 0);
-            data += shape[0];
-            dst += line_size;
-        }
-    };
-
-    void gaussian_smoothing(float *out) {
-        if (ndim == 2) {
-            pack(out, conv<0, 0>());
-        } else if (ndim == 3) {
-            pack(out, conv<0, 0, 0>());
-        }
+        buf = hwy::AllocateAligned<float>(shape[0] + 2 * radius[2]);
     }
 
-    void gaussian_gradient_magnitude(float *out) {
-        auto l2norm = HWY_DYNAMIC_DISPATCH(l2norm);
-        if (ndim == 2) {
-            pack(out, l2norm(buf.get(), conv<1, 0>(), conv<0, 1>(), nullptr, size));
-        } else if (ndim == 3) {
-            pack(out, l2norm(buf.get(), conv<1, 0, 0>(), conv<0, 1, 0>(), conv<0, 0, 1>(), size));
-        }
+    HWY_INLINE const float *src() { return src_; }
+
+    HWY_INLINE float *allocate() {
+        tmp.push_back(hwy::AllocateAligned<float>(total));
+        return tmp.back().get();
     }
 
-    void laplacian_of_gaussian(float *out) {
-        auto add = HWY_DYNAMIC_DISPATCH(add);
-        if (ndim == 2) {
-            pack(out, add(buf.get(), conv<2, 0>(), conv<0, 2>(), nullptr, size));
-        } else if (ndim == 3) {
-            pack(out, add(buf.get(), conv<2, 0, 0>(), conv<0, 2, 0>(), conv<0, 0, 2>(), size));
-        }
+    template <size_t DIM, size_t ORDER> HWY_INLINE void convolve(float *dst, const float *src) {
+        static_assert(DIM < 3);
+        static_assert(ORDER < 3);
+        HWY_DYNAMIC_DISPATCH(convolve)(
+                    DIM,
+                    ORDER,
+                    dst,
+                    src,
+                    shape,
+                    kernel[ORDER].get(),
+                    radius[ORDER],
+                    buf.get());
     }
-
-    void hessian_of_gaussian_eigenvalues(float *out) {
-        if (ndim == 2) {
-
-            auto slot1 = slot<1>();
-            auto slot2 = slot<2>();
-
-            auto ev = HWY_DYNAMIC_DISPATCH(eigenvalues2);
-            ev(slot1, slot2, conv<2, 0>(), conv<1, 1>(), conv<0, 2>(), size);
-
-            out = pack(out, slot1);
-            out = pack(out, slot2);
-
-        } else if (ndim == 3) {
-
-            auto slot1 = slot<1>();
-            auto slot2 = slot<2>();
-            auto slot3 = slot<3>();
-
-            auto ev = HWY_DYNAMIC_DISPATCH(eigenvalues3);
-            ev(slot1,
-               slot2,
-               slot3,
-               conv<2, 0, 0>(),
-               conv<1, 1, 0>(),
-               conv<1, 0, 1>(),
-               conv<0, 2, 0>(),
-               conv<0, 1, 1>(),
-               conv<0, 0, 2>(),
-               size);
-
-            out = pack(out, slot1);
-            out = pack(out, slot2);
-            out = pack(out, slot3);
-        }
-    }
-
-    void structure_tensor_eigenvalues(float *out) {
-        auto f = HWY_DYNAMIC_DISPATCH(convolve);
-
-        auto scale_ex = 0.5 * scale;
-
-        auto radius0_ex = kernel_radius(scale_ex, 0);
-        auto radius1_ex = kernel_radius(scale_ex, 1);
-
-        auto kernel0_ex = hwy::AllocateAligned<float>(radius0_ex + 1);
-        auto kernel1_ex = hwy::AllocateAligned<float>(radius1_ex + 1);
-
-        gaussian_kernel(kernel0_ex.get(), radius0_ex, scale_ex, 0);
-        gaussian_kernel(kernel1_ex.get(), radius1_ex, scale_ex, 1);
-
-        if (ndim == 2) {
-
-            auto slot1 = slot<1>();
-            auto tmp0 = slot<2>();
-            auto tmp1 = slot<3>();
-
-            f(0, 1, slot1, conv<>(), shape, kernel1_ex.get(), radius1_ex, buf.get());
-            f(1, 0, tmp0, slot1, shape, kernel0_ex.get(), radius0_ex, buf.get());
-
-            f(0, 0, slot1, conv<>(), shape, kernel0_ex.get(), radius0_ex, buf.get());
-            f(1, 1, tmp1, slot1, shape, kernel1_ex.get(), radius1_ex, buf.get());
-
-            auto src00 = ste_gaussian_smoothing<1, 4>(tmp0, tmp0);
-            auto src01 = ste_gaussian_smoothing<1, 5>(tmp0, tmp1);
-            auto src11 = ste_gaussian_smoothing<1, 6>(tmp1, tmp1);
-
-            auto dst0 = slot<7>();
-            auto dst1 = slot<8>();
-
-            auto ev = HWY_DYNAMIC_DISPATCH(eigenvalues2);
-            ev(dst0, dst1, src00, src01, src11, size);
-
-            out = pack(out, dst0);
-            out = pack(out, dst1);
-
-        } else if (ndim == 3) {
-
-            auto slot1 = slot<1>();
-
-            auto tmp0 = slot<2>();
-            auto tmp1 = slot<3>();
-            auto tmp2 = slot<4>();
-
-            f(0, 1, tmp0, conv<>(), shape, kernel1_ex.get(), radius1_ex, buf.get());
-            f(1, 0, slot1, tmp0, shape, kernel0_ex.get(), radius0_ex, buf.get());
-            f(2, 0, tmp0, slot1, shape, kernel0_ex.get(), radius0_ex, buf.get());
-
-            f(0, 0, tmp1, conv<>(), shape, kernel0_ex.get(), radius0_ex, buf.get());
-            f(1, 1, slot1, tmp1, shape, kernel1_ex.get(), radius1_ex, buf.get());
-            f(2, 0, tmp1, slot1, shape, kernel0_ex.get(), radius0_ex, buf.get());
-
-            f(0, 0, tmp2, conv<>(), shape, kernel0_ex.get(), radius0_ex, buf.get());
-            f(1, 0, slot1, tmp2, shape, kernel0_ex.get(), radius0_ex, buf.get());
-            f(2, 1, tmp2, slot1, shape, kernel1_ex.get(), radius1_ex, buf.get());
-
-            auto src00 = ste_gaussian_smoothing<1, 5>(tmp0, tmp0);
-            auto src01 = ste_gaussian_smoothing<1, 6>(tmp0, tmp1);
-            auto src02 = ste_gaussian_smoothing<1, 7>(tmp0, tmp2);
-            auto src11 = ste_gaussian_smoothing<1, 8>(tmp1, tmp1);
-            auto src12 = ste_gaussian_smoothing<1, 9>(tmp1, tmp2);
-            auto src22 = ste_gaussian_smoothing<1, 10>(tmp2, tmp2);
-
-            auto dst0 = slot<11>();
-            auto dst1 = slot<12>();
-            auto dst2 = slot<13>();
-
-            auto ev = HWY_DYNAMIC_DISPATCH(eigenvalues3);
-            ev(dst0, dst1, dst2, src00, src01, src02, src11, src12, src22, size);
-
-            out = pack(out, dst0);
-            out = pack(out, dst1);
-            out = pack(out, dst2);
-
-        }
-    }
-
-    template <int tmp_idx, int dst_idx> float *ste_gaussian_smoothing(const float *HWY_RESTRICT src1, const float *HWY_RESTRICT src2) {
-        auto f = HWY_DYNAMIC_DISPATCH(convolve);
-        auto mul = HWY_DYNAMIC_DISPATCH(mul);
-
-        auto tmp = slot<tmp_idx>();
-        auto dst = slot<dst_idx>();
-
-        if (ndim == 2) {
-            mul(dst, src1, src2, nullptr, size);
-            f(0, 0, tmp, dst, shape, kernel[0].get(), radius[0], buf.get());
-            f(1, 0, dst, tmp, shape, kernel[0].get(), radius[0], buf.get());
-        } else if (ndim == 3) {
-            mul(tmp, src1, src2, nullptr, size);
-            f(0, 0, dst, tmp, shape, kernel[0].get(), radius[0], buf.get());
-            f(1, 0, tmp, dst, shape, kernel[0].get(), radius[0], buf.get());
-            f(2, 0, dst, tmp, shape, kernel[0].get(), radius[0], buf.get());
-        }
-
-        return dst;
-    }
-
-    float *pack(float *HWY_RESTRICT dst, const float *HWY_RESTRICT src) {
-        for (size_t zy = 0; zy < shape[2] * shape[1]; ++zy) {
-            std::copy_n(src, shape[0], dst);
-            src += line_size;
-            dst += shape[0];
-        }
-        return dst;
-    }
-
-    template <int idx> float *slot() {
-        static_assert(idx > 0);
-        constexpr auto key = -idx;
-        auto it = cache.find(key);
-        if (it == cache.end()) {
-            it = cache.emplace(key, hwy::AllocateAligned<float>(size)).first;
-        }
-        return it->second.get();
-    }
-
-    template <int order0 = -1, int order1 = -1, int order2 = -1> float *conv() {
-        return iconv<order0, order1, order2>();
-    }
-
-    template <int order0 = -1, int order1 = -1, int order2 = -1> HWY_INLINE float *iconv() {
-        static_assert(-1 <= order0 && order0 < 3);
-        static_assert(-1 <= order1 && order1 < 3);
-        static_assert(-1 <= order2 && order2 < 3);
-        constexpr auto key = (order0 + 1) + 4 * (order1 + 1) + 16 * (order2 + 1);
-
-        if (auto it = cache.find(key); it != cache.end()) {
-            return it->second.get();
-        }
-
-        auto dst = cache.emplace(key, hwy::AllocateAligned<float>(size)).first->second.get();
-
-        auto f = HWY_DYNAMIC_DISPATCH(convolve);
-        if constexpr (order2 >= 0) {
-            f(2, order2, dst, iconv<order0, order1>(), shape, kernel[order2].get(), radius[order2], buf.get());
-        } else if constexpr (order1 >= 0) {
-            f(1, order1, dst, iconv<order0>(), shape, kernel[order1].get(), radius[order1], buf.get());
-        } else if constexpr (order0 >= 0) {
-            f(0, order0, dst, iconv<>(), shape, kernel[order0].get(), radius[order0], buf.get());
-        }
-
-        return dst;
-    }
-
-    shape_type shape;
-    size_t ndim;
-    double scale;
-
-    size_t line_size;
-    size_t size;
-    std::array<size_t, 3> radius;
-    std::array<hwy::AlignedFreeUniquePtr<float[]>, 3> kernel;
-    hwy::AlignedFreeUniquePtr<float[]> buf;
-
-    std::unordered_map<int, hwy::AlignedFreeUniquePtr<float[]>> cache;
-
-    size_t ste_radius;
-    hwy::AlignedFreeUniquePtr<float[]> ste_kernel;
 };
 
-filters::filters(const float *data, shape_type shape, size_t ndim, double scale)
-        : pimpl{std::make_unique<impl>(data, shape, ndim, scale)} {}
+void gaussian_smoothing(float *out, const float *data, shape_type shape, size_t ndim, double scale) {
+    context ctx{data, shape, scale};
+    auto x = ctx.allocate();
+    ctx.convolve<0, 0>(x, data);
+    if (ndim == 2) {
+        ctx.convolve<1, 0>(out, x);
+    } else {
+        auto y = ctx.allocate();
+        ctx.convolve<1, 0>(y, x);
+        ctx.convolve<2, 0>(out, y);
+    }
+}
 
-filters::filters() = default;
-filters::filters(filters &&other) noexcept = default;
-filters &filters::operator=(filters &&) noexcept = default;
-filters::~filters() = default;
+void gaussian_gradient_magnitude(float *out, const float *data, shape_type shape, size_t ndim, double scale) {
+    context ctx{data, shape, scale};
+    auto x = ctx.allocate();
+    auto y = ctx.allocate();
+    ctx.convolve<0, 1>(x, ctx.src());
+    ctx.convolve<1, 0>(y, x);
+    if (ndim == 2) {
+        HWY_DYNAMIC_DISPATCH(l2norm)(out, y, x, nullptr, ctx.total);
+    } else {
+        auto z = ctx.allocate();
+    }
+}
 
-void filters::gaussian_smoothing(float *out) { pimpl->gaussian_smoothing(out); }
-void filters::gaussian_gradient_magnitude(float *out) { pimpl->gaussian_gradient_magnitude(out); }
-void filters::laplacian_of_gaussian(float *out) { pimpl->laplacian_of_gaussian(out); }
-void filters::hessian_of_gaussian_eigenvalues(float *out) { pimpl->hessian_of_gaussian_eigenvalues(out); }
-void filters::structure_tensor_eigenvalues(float *out) { pimpl->structure_tensor_eigenvalues(out); }
+void laplacian_of_gaussian(float *out, const float *data, shape_type shape, size_t ndim, double scale) {
+    static_cast<void>(out);
+    static_cast<void>(data);
+    static_cast<void>(shape);
+    static_cast<void>(ndim);
+    static_cast<void>(scale);
+}
+
+void hessian_of_gaussian_eigenvalues(float *out, const float *data, shape_type shape, size_t ndim, double scale) {
+    static_cast<void>(out);
+    static_cast<void>(data);
+    static_cast<void>(shape);
+    static_cast<void>(ndim);
+    static_cast<void>(scale);
+}
+
+void structure_tensor_eigenvalues(float *out, const float *data, shape_type shape, size_t ndim, double scale) {
+    static_cast<void>(out);
+    static_cast<void>(data);
+    static_cast<void>(shape);
+    static_cast<void>(ndim);
+    static_cast<void>(scale);
+}
 
 }; // namespace fastfilters2
 #endif

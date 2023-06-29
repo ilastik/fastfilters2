@@ -55,6 +55,7 @@ dependencies = [
 [tool.pytest.ini_options]
 addopts = "--benchmark-disable --benchmark-group-by=param"
 python_functions = ["bench_*", "test_*"]
+python_classes = ["Bench*", "Test*"]
 testpaths = ["tests"]
 
 [tool.cibuildwheel]

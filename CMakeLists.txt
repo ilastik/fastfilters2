@@ -23,7 +23,7 @@ add_subdirectory(deps/pybind11)
 add_library(fastfilters2 cpp/fastfilters2.cpp)
 target_link_libraries(fastfilters2 PRIVATE hwy)
 target_include_directories(fastfilters2 PRIVATE cpp)
-set_cxx_std(fastfilters2 20)
+set_cxx_std(fastfilters2 17)
 enable_cxx_warnings(fastfilters2)
 
 pybind11_add_module(pymodule cpp/pymodule.cpp)
@@ -32,5 +32,5 @@ set_target_properties(pymodule PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/fastfilters2
     OUTPUT_NAME _core
 )
-set_cxx_std(pymodule 20)
+set_cxx_std(pymodule 17)
 enable_cxx_warnings(pymodule)
