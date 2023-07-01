@@ -1,5 +1,4 @@
 #include "fastfilters2.h"
-
 #include "util.h"
 
 #include <hwy/aligned_allocator.h>
@@ -203,28 +202,63 @@ void conv_z(ptr src,
     }
 }
 
-void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
-    constexpr ssize_t Order = 0;
-    auto nelems = shape[0] * shape[1] * (ndim == 2 ? 1 : shape[2]);
-    auto radius = ff2::kernel_radius(scale, Order);
+struct context {
+    static constexpr ssize_t N = 3;
 
-    auto kernel = hwy::AllocateAligned<val_t>(radius + 1);
-    auto buf = hwy::AllocateAligned<val_t>(shape[ndim - 1] + 2 * radius);
+    ssize_ptr shape;
+    ssize_t ndim;
+    ssize_t size;
+    ssize_t radius[N];
+    hwy::AlignedFreeUniquePtr<val_t[]> kernel[N];
+    hwy::AlignedFreeUniquePtr<val_t[]> buf;
+    std::vector<hwy::AlignedFreeUniquePtr<val_t[]>> tmp;
 
-    auto tmp1 = hwy::AllocateAligned<val_t>(nelems);
-    decltype(tmp1) tmp2;
-    if (ndim == 3) {
-        tmp2 = hwy::AllocateAligned<val_t>(nelems);
+    context(ssize_ptr shape, ssize_t ndim, double scale) : shape{shape}, ndim{ndim}, size{1} {
+        for (ssize_t i = 0; i < ndim; ++i) {
+            size *= shape[i];
+        }
+        for (ssize_t i = 0; i < N; ++i) {
+            radius[i] = ff2::kernel_radius(scale, i);
+        }
+        for (ssize_t i = 0; i < N; ++i) {
+            kernel[i] = hwy::AllocateAligned<val_t>(radius[i] + 1);
+        }
+        buf = hwy::AllocateAligned<val_t>(shape[ndim - 1] + 2 * radius[N - 1]);
+        for (ssize_t i = 0; i < N; ++i) {
+            ff2::gaussian_kernel(kernel[i].get(), radius[i], scale, i);
+        }
     }
 
-    ff2::gaussian_kernel(kernel.get(), radius, scale, Order);
+    mut_ptr allocate() {
+        tmp.push_back(hwy::AllocateAligned<val_t>(size));
+        return tmp.back().get();
+    }
 
-    conv_x<Order>(src, tmp1.get(), shape, ndim, kernel.get(), radius, buf.get());
-    if (ndim == 2) {
-        conv_y<Order>(tmp1.get(), dst, shape, ndim, kernel.get(), radius, buf.get());
-    } else {
-        conv_y<Order>(tmp1.get(), tmp2.get(), shape, ndim, kernel.get(), radius, buf.get());
-        conv_z<Order>(tmp2.get(), dst, shape, ndim, kernel.get(), radius, buf.get());
+    template <ssize_t Order> void conv(ssize_t dim, ptr src, mut_ptr dst) {
+        static_assert(0 <= Order && Order < N);
+        auto kernel = this->kernel[Order].get();
+        auto radius = this->radius[Order];
+        auto buf = this->buf.get();
+        if (dim == ndim - 1) {
+            conv_x<Order>(src, dst, shape, ndim, kernel, radius, buf);
+        } else if (dim == ndim - 2) {
+            conv_y<Order>(src, dst, shape, ndim, kernel, radius, buf);
+        } else {
+            conv_z<Order>(src, dst, shape, ndim, kernel, radius, buf);
+        }
+    }
+};
+
+void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    context ctx{shape, ndim, scale};
+
+    mut_ptr tmp1 = ctx.allocate();
+    mut_ptr tmp2 = ndim == 2 ? dst : ctx.allocate();
+
+    ctx.conv<0>(ndim - 1, src, tmp1);
+    ctx.conv<0>(ndim - 2, tmp1, tmp2);
+    if (ndim == 3) {
+        ctx.conv<0>(ndim - 3, tmp2, dst);
     }
 }
 

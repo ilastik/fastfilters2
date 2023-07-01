@@ -1,8 +1,9 @@
 #ifndef FASTFILTERS2_H_
 #define FASTFILTERS2_H_
 
-#include <cstddef>
 #include <hwy/base.h>
+
+#include <cstddef>
 #include <type_traits>
 
 namespace fastfilters2 {

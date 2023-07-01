@@ -8,6 +8,7 @@
 namespace ff = fastfilters2;
 namespace py = pybind11;
 static_assert(std::is_same_v<ff::ssize_t, py::ssize_t>);
+using py::ssize_t;
 
 PYBIND11_MODULE(_core, m) {
     using namespace py::literals;
@@ -15,7 +16,7 @@ PYBIND11_MODULE(_core, m) {
 
     m.def(
             "gaussian_kernel",
-            [](double scale, py::ssize_t order) {
+            [](double scale, ssize_t order) {
                 if (scale <= 0) {
                     throw std::invalid_argument("scale must be positive");
                 }
@@ -23,9 +24,9 @@ PYBIND11_MODULE(_core, m) {
                     throw std::invalid_argument("order must be 0, 1, or 2");
                 }
 
-                auto size = ff::kernel_radius(scale, order) + 1;
-                py::array_t<ff::val_t> kernel{size};
-                ff::gaussian_kernel(kernel.mutable_data(), size, scale, order);
+                auto radius = ff::kernel_radius(scale, order);
+                py::array_t<ff::val_t> kernel{radius + 1};
+                ff::gaussian_kernel(kernel.mutable_data(), radius, scale, order);
                 return kernel;
             },
             "scale"_a,
@@ -34,6 +35,7 @@ PYBIND11_MODULE(_core, m) {
     m.def(
             "gaussian_smoothing",
             [](py::array_t<ff::val_t, c_contig> src, double scale) {
+                constexpr ssize_t order = 0;
                 auto shape = src.shape();
                 auto ndim = src.ndim();
 
@@ -44,10 +46,10 @@ PYBIND11_MODULE(_core, m) {
                     throw std::invalid_argument("scale must be positive");
                 }
 
-                auto radius = ff::kernel_radius(scale, 0);
-                for (auto i = 0; i < ndim; ++i) {
+                auto radius = ff::kernel_radius(scale, order);
+                for (ssize_t i = 0; i < ndim; ++i) {
                     if (shape[i] <= radius) {
-                        throw std::invalid_argument("src is too small");
+                        throw std::invalid_argument("src is too small for the given scale");
                     }
                 }
 

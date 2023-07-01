@@ -49,7 +49,6 @@ def idfn(val):
         return "x".join(map(str, val))
 
 
-@pytest.mark.skip
 class TestGaussianKernel:
     @pytest.mark.parametrize("order", [0, 1, 2])
     @pytest.mark.parametrize("scale", [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0])
@@ -72,12 +71,6 @@ class TestGaussianKernel:
             fastfilters2.gaussian_kernel(1, order)
 
 
-@pytest.mark.skip(reason="not a bottleneck")
-@pytest.mark.parametrize("scale, order", [(0.3, 0), (10, 2)])
-def bench_gaussian_kernel(benchmark, scale, order):
-    benchmark(fastfilters2.gaussian_kernel, scale, order)
-
-
 @pytest.mark.parametrize("scale", [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0])
 @pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
 class TestFilters:
@@ -86,6 +79,12 @@ class TestFilters:
         actual = fastfilters2.gaussian_smoothing(data, scale)
         desired = fastfilters.gaussianSmoothing(data, scale)
         numpy.testing.assert_array_almost_equal_nulp(actual, desired, nulp=4)
+
+
+@pytest.mark.skip(reason="not a bottleneck")
+@pytest.mark.parametrize("scale, order", [(0.3, 0), (10, 2)])
+def bench_gaussian_kernel(benchmark, scale, order):
+    benchmark(fastfilters2.gaussian_kernel, scale, order)
 
 
 @pytest.mark.parametrize("scale", [0.3, 10.0])
