@@ -39,6 +39,80 @@ using D = hn::CappedTag<val_t, 64 / sizeof(val_t)>;
 constexpr ssize_t Unroll = 8;
 
 /**
+ * Compute the central element and the right half of a Gaussian kernel.
+ * The left half is not explicitly stored.
+ * However, is equal to the reversed right half (symmetric case, when the order is even),
+ * or the negated reversed right half (antisymmetric case, when the order is odd).
+ */
+void gaussian_kernel(mut_ptr kernel, ssize_t radius, double scale, ssize_t order) {
+    HWY_ASSUME(radius > 0);
+    HWY_ASSUME(scale > 0);
+    HWY_ASSUME(order >= 0);
+    HWY_ASSUME(order <= 2);
+
+    // Compute constants for the subsequent computations.
+    // Divisions are usually expensive and not pipelined,
+    // so use multiplications by an inverse instead.
+    double inv_sigma = 1 / scale;
+    double inv_sigma2 = inv_sigma * inv_sigma;
+    constexpr double inv_sqrt_tau = 0.3989422804014327; // inv_sqrt_tau = 1 / sqrt(2 * pi)
+    double norm = inv_sqrt_tau * inv_sigma;
+    if (order > 0) {
+        norm = -norm * inv_sigma2;
+    }
+
+    // Compute the initial coefficients from the Gaussian or Gaussian derivative formulae.
+    // Even though the kernel is numerically normalized later anyway, still multiply by the norm
+    // for numerical compatibility with the old version of this library.
+    for (ssize_t x = 0; x <= radius; ++x) {
+        double x2_over_sigma2 = x * x * inv_sigma2;
+        double g = norm * std::exp(-0.5 * x2_over_sigma2);
+        if (order == 0) {
+            kernel[x] = g;
+        } else if (order == 1) {
+            kernel[x] = g * x;
+        } else if (order == 2) {
+            kernel[x] = g * (1 - x2_over_sigma2);
+        }
+    }
+
+    // Remove the DC component for the second derivative.
+    if (order == 2) {
+        double sum = 0;
+        for (ssize_t x = 1; x <= radius; ++x) {
+            sum += kernel[x];
+        }
+        sum = kernel[0] + 2 * sum;
+        double mean = sum / (2 * radius + 1);
+        for (ssize_t x = 0; x <= radius; ++x) {
+            kernel[x] -= mean;
+        }
+    }
+
+    // Numerically normalize the kernel.
+    // For the second derivative, even though the actual formula is 0.5 * kernel[x] * x * x,
+    // skip multiplying by 0.5 when summing, but also don't multiply by 2 at the end
+    // (kernel[0] should be zero because of the DC removal).
+    double sum = 0;
+    for (ssize_t x = 1; x <= radius; ++x) {
+        if (order == 0) {
+            sum += kernel[x];
+        } else if (order == 1) {
+            sum += kernel[x] * x;
+        } else if (order == 2) {
+            sum += kernel[x] * x * x;
+        }
+    }
+    if (order != 2) {
+        sum = kernel[0] + 2 * sum;
+    }
+    double inv_sum = 1 / sum;
+    for (ssize_t x = 0; x <= radius; ++x) {
+        kernel[x] *= inv_sum;
+    }
+}
+
+/**
  * Batch is a group of consecutive lanes that are processed together.
  * When processing an input, it's contiguous dimension cannot be smaller than the batch size.
  */
@@ -225,7 +299,7 @@ struct context {
         }
         buf = hwy::AllocateAligned<val_t>(shape[ndim - 1] + 2 * radius[N - 1]);
         for (ssize_t i = 0; i < N; ++i) {
-            ff2::gaussian_kernel(kernel[i].get(), radius[i], scale, i);
+            gaussian_kernel(kernel[i].get(), radius[i], scale, i);
         }
     }
 
@@ -495,14 +569,6 @@ namespace fastfilters2 {
 // for all compiled targets from recusive includes.
 // The best implementation could be selected at runtime via HWY_DYNAMIC_DISPATCH.
 
-HWY_EXPORT(batch_size);
-ssize_t batch_size() { return HWY_DYNAMIC_DISPATCH(batch_size)(); }
-
-HWY_EXPORT(gaussian_smoothing);
-void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
-    HWY_DYNAMIC_DISPATCH(gaussian_smoothing)(src, dst, shape, ndim, scale);
-}
-
 /**
  * Return radius of a Gaussian kernel for given scale (sigma) and order.
  * Order is the kernel derivative order (0, 1 or 2).
@@ -511,78 +577,17 @@ void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, dou
  */
 ssize_t kernel_radius(double scale, ssize_t order) { return std::ceil((3 + 0.5 * order) * scale); }
 
-/**
- * Compute the central element and the right half of a Gaussian kernel.
- * The left half is not explicitly stored.
- * However, is equal to the reversed right half (symmetric case, when the order is even),
- * or the negated reversed right half (antisymmetric case, when the order is odd).
- */
+HWY_EXPORT(gaussian_kernel);
 void gaussian_kernel(mut_ptr kernel, ssize_t radius, double scale, ssize_t order) {
-    HWY_ASSUME(radius > 0);
-    HWY_ASSUME(scale > 0);
-    HWY_ASSUME(order >= 0);
-    HWY_ASSUME(order <= 2);
+    HWY_DYNAMIC_DISPATCH(gaussian_kernel)(kernel, radius, scale, order);
+}
 
-    // Compute constants for the subsequent computations.
-    // Divisions are usually expensive and not pipelined,
-    // so use multiplications by an inverse instead.
-    double inv_sigma = 1 / scale;
-    double inv_sigma2 = inv_sigma * inv_sigma;
-    constexpr double inv_sqrt_tau = 0.3989422804014327; // inv_sqrt_tau = 1 / sqrt(2 * pi)
-    double norm = inv_sqrt_tau * inv_sigma;
-    if (order > 0) {
-        norm = -norm * inv_sigma2;
-    }
+HWY_EXPORT(batch_size);
+ssize_t batch_size() { return HWY_DYNAMIC_DISPATCH(batch_size)(); }
 
-    // Compute the initial coefficients from the Gaussian or Gaussian derivative formulae.
-    // Even though the kernel is numerically normalized later anyway, still multiply by the norm
-    // for numerical compatibility with the old version of this library.
-    for (ssize_t x = 0; x <= radius; ++x) {
-        double x2_over_sigma2 = x * x * inv_sigma2;
-        double g = norm * std::exp(-0.5 * x2_over_sigma2);
-        if (order == 0) {
-            kernel[x] = g;
-        } else if (order == 1) {
-            kernel[x] = g * x;
-        } else if (order == 2) {
-            kernel[x] = g * (1 - x2_over_sigma2);
-        }
-    }
-
-    // Remove the DC component for the second derivative.
-    if (order == 2) {
-        double sum = 0;
-        for (ssize_t x = 1; x <= radius; ++x) {
-            sum += kernel[x];
-        }
-        sum = kernel[0] + 2 * sum;
-        double mean = sum / (2 * radius + 1);
-        for (ssize_t x = 0; x <= radius; ++x) {
-            kernel[x] -= mean;
-        }
-    }
-
-    // Numerically normalize the kernel.
-    // For the second derivative, even though the actual formula is 0.5 * kernel[x] * x * x,
-    // skip multiplying by 0.5 when summing, but also don't multiply by 2 at the end
-    // (kernel[0] should be zero because of the DC removal).
-    double sum = 0;
-    for (ssize_t x = 1; x <= radius; ++x) {
-        if (order == 0) {
-            sum += kernel[x];
-        } else if (order == 1) {
-            sum += kernel[x] * x;
-        } else if (order == 2) {
-            sum += kernel[x] * x * x;
-        }
-    }
-    if (order != 2) {
-        sum = kernel[0] + 2 * sum;
-    }
-    double inv_sum = 1 / sum;
-    for (ssize_t x = 0; x <= radius; ++x) {
-        kernel[x] *= inv_sum;
-    }
+HWY_EXPORT(gaussian_smoothing);
+void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    HWY_DYNAMIC_DISPATCH(gaussian_smoothing)(src, dst, shape, ndim, scale);
 }
 
 }; // namespace fastfilters2
