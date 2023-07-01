@@ -5,7 +5,7 @@ Language: Cpp
 AccessModifierOffset: -4
 BinPackArguments: false
 BinPackParameters: false
-ColumnLimit: 120
+ColumnLimit: 100
 ConstructorInitializerIndentWidth: 8
 ContinuationIndentWidth: 8
 IndentWidth: 4

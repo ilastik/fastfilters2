@@ -1,21 +1,24 @@
 #ifndef FASTFILTERS2_H_
 #define FASTFILTERS2_H_
 
-#include <array>
 #include <cstddef>
+#include <hwy/base.h>
+#include <type_traits>
 
 namespace fastfilters2 {
-using std::size_t;
-using shape_type = std::array<size_t, 3>;
+using val_t = float;
+using ptr = const val_t *HWY_RESTRICT;
+using mut_ptr = val_t *HWY_RESTRICT;
 
-size_t kernel_radius(double sigma, size_t order);
-void gaussian_kernel(float *kernel, size_t radius, double scale, size_t order);
+// Same as decltype(0z) in C++23.
+using ssize_t = std::make_signed_t<std::size_t>;
+using ssize_ptr = const ssize_t *HWY_RESTRICT;
 
-void gaussian_smoothing(float *out, const float *data, shape_type shape, size_t ndim, double scale);
-void gaussian_gradient_magnitude(float *out, const float *data, shape_type shape, size_t ndim, double scale);
-void laplacian_of_gaussian(float *out, const float *data, shape_type shape, size_t ndim, double scale);
-void hessian_of_gaussian_eigenvalues(float *out, const float *data, shape_type shape, size_t ndim, double scale);
-void structure_tensor_eigenvalues(float *out, const float *data, shape_type shape, size_t ndim, double scale);
+ssize_t batch_size();
+void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale);
+
+ssize_t kernel_radius(double scale, ssize_t order);
+void gaussian_kernel(mut_ptr kernel, ssize_t size, double scale, ssize_t order);
 
 } // namespace fastfilters2
 
