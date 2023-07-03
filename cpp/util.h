@@ -3,6 +3,7 @@
 
 #include "fastfilters2.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace fastfilters2::util {
@@ -32,25 +33,29 @@ template <ssize_t N, typename Func, typename... Args> void static_for(Func func,
 }
 
 /**
- * Copy src to dst, reflecting the first and the last radius elements.
- * The first and the last element are not included in the reflection.
- * Example for size = 6 and radius = 2: [012345] -> 21[012345]43.
+ * Copy src to dst with the reflected borders and zero padding.
+ * dst should point to a memory of at least min_size + 2 * radius elements.
+ * 1. Copy the first radius elements in reverse order, without the first element.
+ * 2. Copy all elements from src to dst, from first to last, in the same order.
+ * 3. Copy the last radius elements in reverse order, without the last element.
+ * 4. If min_size > size, fill the rest of dst with zeros.
  */
 template <typename T>
-void reflect_copy(const T *HWY_RESTRICT src, T *HWY_RESTRICT dst, ssize_t size, ssize_t radius) {
+void reflect_copy(const T *HWY_RESTRICT src,
+                  T *HWY_RESTRICT dst,
+                  ssize_t size,
+                  ssize_t min_size,
+                  ssize_t radius) {
     HWY_ASSUME(size > 0);
+    // HWY_ASSUME(min_size > 0);
+    // HWY_ASSUME(min_size % 2 == 0);
     HWY_ASSUME(radius > 0);
-    HWY_ASSUME(size > radius);
+    // HWY_ASSUME(size > radius);
 
-    for (ssize_t i = 0; i < radius; ++i) {
-        dst[i] = src[radius - i];
-    }
-    for (ssize_t i = 0; i < size; ++i) {
-        dst[radius + i] = src[i];
-    }
-    for (ssize_t i = 0; i < radius; ++i) {
-        dst[radius + size + i] = src[size - 2 - i];
-    }
+    dst = std::reverse_copy(src + 1, src + 1 + radius, dst);
+    dst = std::copy_n(src, size, dst);
+    dst = std::reverse_copy(src + size - 1 - radius, src + size - 1, dst);
+    std::fill_n(dst, HWY_MAX(0, min_size - size), 0);
 }
 } // namespace fastfilters2::util
 

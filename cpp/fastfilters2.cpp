@@ -3,6 +3,10 @@
 
 #include <hwy/aligned_allocator.h>
 
+#include <algorithm>
+
+#include <iostream>
+
 // Comma-separated list of names.
 // Used for declare multiple variables and passing them to varidic functions.
 #ifndef ARGLIST
@@ -39,6 +43,11 @@ using D = hn::CappedTag<val_t, 64 / sizeof(val_t)>;
 constexpr ssize_t Unroll = 8;
 
 /**
+ * Return the number of elements in a consecutive group of lanes.
+ */
+ssize_t batch_size() { return Unroll * hn::Lanes(D{}); }
+
+/**
  * Compute the central element and the right half of a Gaussian kernel.
  * The left half is not explicitly stored.
  * However, is equal to the reversed right half (symmetric case, when the order is even),
@@ -55,7 +64,7 @@ void gaussian_kernel(mut_ptr kernel, ssize_t radius, double scale, ssize_t order
     // so use multiplications by an inverse instead.
     double inv_sigma = 1 / scale;
     double inv_sigma2 = inv_sigma * inv_sigma;
-    constexpr double inv_sqrt_tau = 0.3989422804014327; // inv_sqrt_tau = 1 / sqrt(2 * pi)
+    constexpr double inv_sqrt_tau = 0.3989422804014327; // 1 / sqrt(2 * pi)
     double norm = inv_sqrt_tau * inv_sigma;
     if (order > 0) {
         norm = -norm * inv_sigma2;
@@ -111,12 +120,6 @@ void gaussian_kernel(mut_ptr kernel, ssize_t radius, double scale, ssize_t order
         kernel[x] *= inv_sum;
     }
 }
-
-/**
- * Batch is a group of consecutive lanes that are processed together.
- * When processing an input, it's contiguous dimension cannot be smaller than the batch size.
- */
-ssize_t batch_size() { return Unroll * hn::Lanes(D{}); }
 
 /**
  * Vertically convolve a batch of consecutive lanes with a kernel.
@@ -197,12 +200,12 @@ void conv_x(ptr src,
             ssize_t radius,
             mut_ptr buf) {
 
+    ssize_t step = batch_size();
     auto outer_size = ndim == 2 ? shape[0] : shape[0] * shape[1];
-    auto contig_size = shape[ndim - 1];
-    auto step = batch_size();
+    auto contig_size = HWY_MAX(step, shape[ndim - 1]);
 
-    for (ssize_t i = 0; i < outer_size; ++i, src += contig_size, dst += contig_size) {
-        util::reflect_copy(src, buf, contig_size, radius);
+    for (ssize_t i = 0; i < outer_size; ++i, src += shape[ndim - 1], dst += contig_size) {
+        util::reflect_copy(src, buf, shape[ndim - 1], step, radius);
         for (ssize_t x = 0; x < contig_size; x += step) {
             x = HWY_MIN(x, contig_size - step);
             conv_batch<Order, true>(buf + radius + x, dst + x, kernel, radius, 0, 0, 0);
@@ -223,11 +226,11 @@ void conv_y(ptr src,
     // in order to keep the function signature identical to conv_contig.
     static_cast<void>(buf);
 
+    ssize_t step = batch_size();
     auto outer_size = ndim == 2 ? 1 : shape[0];
     auto inner_size = shape[ndim - 2];
-    auto contig_size = shape[ndim - 1];
+    auto contig_size = HWY_MAX(step, shape[ndim - 1]);
     auto outer_step = inner_size * contig_size;
-    auto step = batch_size();
 
     for (ssize_t i = 0; i < outer_size; ++i, src += outer_step, dst += outer_step) {
         for (ssize_t x = 0; x < contig_size; x += step) {
@@ -257,12 +260,12 @@ void conv_z(ptr src,
     // ndim is also not used because ndim <= 3, and this function colvolves along the Z axis.
     static_cast<void>(ndim);
 
+    ssize_t step = batch_size();
     auto outer_size = shape[1];
     auto inner_size = shape[0];
-    auto contig_size = shape[2];
+    auto contig_size = HWY_MAX(step, shape[2]);
     auto outer_step = contig_size;
     auto inner_step = contig_size * outer_size;
-    auto step = batch_size();
 
     for (ssize_t i = 0; i < outer_size; ++i, src += outer_step, dst += outer_step) {
         for (ssize_t x = 0; x < contig_size; x += step) {
@@ -279,40 +282,63 @@ void conv_z(ptr src,
 struct context {
     static constexpr ssize_t N = 3;
 
+    ptr src_;
+    mut_ptr dst_;
     ssize_ptr shape;
     ssize_t ndim;
     ssize_t size;
+    ssize_t temp_size;
     ssize_t radius[N];
-    hwy::AlignedFreeUniquePtr<val_t[]> kernel[N];
-    hwy::AlignedFreeUniquePtr<val_t[]> buf;
-    std::vector<hwy::AlignedFreeUniquePtr<val_t[]>> tmp;
+    std::vector<hwy::AlignedFreeUniquePtr<val_t[]>> cache;
+    mut_ptr tmp_dst;
 
-    context(ssize_ptr shape, ssize_t ndim, double scale) : shape{shape}, ndim{ndim}, size{1} {
-        for (ssize_t i = 0; i < ndim; ++i) {
+    context(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale)
+            : src_{src}, dst_{dst}, shape{shape}, ndim{ndim}, size{1}, temp_size{1}, cache(N + 1) {
+
+        auto step = batch_size();
+        auto contig_size = shape[ndim - 1];
+        auto min_size = HWY_MAX(contig_size, step);
+
+        for (ssize_t i = 0; i < ndim - 1; ++i) {
             size *= shape[i];
+            temp_size *= shape[i];
         }
+        size *= contig_size;
+        temp_size *= min_size;
+
         for (ssize_t i = 0; i < N; ++i) {
             radius[i] = ff2::kernel_radius(scale, i);
+            cache[i] = hwy::AllocateAligned<val_t>(radius[i] + 1);
+            gaussian_kernel(cache[i].get(), radius[i], scale, i);
         }
-        for (ssize_t i = 0; i < N; ++i) {
-            kernel[i] = hwy::AllocateAligned<val_t>(radius[i] + 1);
+        cache[N] = hwy::AllocateAligned<val_t>(min_size + 2 * radius[N - 1]);
+        tmp_dst = contig_size < min_size ? allocate() : dst_;
+    }
+
+    ~context() {
+        if (dst_ == tmp_dst) {
+            return;
         }
-        buf = hwy::AllocateAligned<val_t>(shape[ndim - 1] + 2 * radius[N - 1]);
-        for (ssize_t i = 0; i < N; ++i) {
-            gaussian_kernel(kernel[i].get(), radius[i], scale, i);
+        auto min_size = batch_size();
+        auto q = dst_;
+        for (mut_ptr p = tmp_dst; p != tmp_dst + temp_size; p += min_size) {
+            q = std::copy_n(p, shape[ndim - 1], q);
         }
     }
 
+    ptr src() { return src_; }
+    mut_ptr dst() { return tmp_dst; }
+
     mut_ptr allocate() {
-        tmp.push_back(hwy::AllocateAligned<val_t>(size));
-        return tmp.back().get();
+        cache.push_back(hwy::AllocateAligned<val_t>(temp_size));
+        return cache.back().get();
     }
 
     template <ssize_t Order> void conv(ssize_t dim, ptr src, mut_ptr dst) {
         static_assert(0 <= Order && Order < N);
-        auto kernel = this->kernel[Order].get();
+        auto kernel = this->cache[Order].get();
         auto radius = this->radius[Order];
-        auto buf = this->buf.get();
+        auto buf = this->cache[N].get();
         if (dim == ndim - 1) {
             conv_x<Order>(src, dst, shape, ndim, kernel, radius, buf);
         } else if (dim == ndim - 2) {
@@ -324,15 +350,15 @@ struct context {
 };
 
 void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
-    context ctx{shape, ndim, scale};
+    context ctx{src, dst, shape, ndim, scale};
 
     mut_ptr tmp1 = ctx.allocate();
-    mut_ptr tmp2 = ndim == 2 ? dst : ctx.allocate();
+    mut_ptr tmp2 = ndim == 2 ? ctx.dst() : ctx.allocate();
 
-    ctx.conv<0>(ndim - 1, src, tmp1);
+    ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
     ctx.conv<0>(ndim - 2, tmp1, tmp2);
     if (ndim == 3) {
-        ctx.conv<0>(ndim - 3, tmp2, dst);
+        ctx.conv<0>(ndim - 3, tmp2, ctx.dst());
     }
 }
 
@@ -581,9 +607,6 @@ HWY_EXPORT(gaussian_kernel);
 void gaussian_kernel(mut_ptr kernel, ssize_t radius, double scale, ssize_t order) {
     HWY_DYNAMIC_DISPATCH(gaussian_kernel)(kernel, radius, scale, order);
 }
-
-HWY_EXPORT(batch_size);
-ssize_t batch_size() { return HWY_DYNAMIC_DISPATCH(batch_size)(); }
 
 HWY_EXPORT(gaussian_smoothing);
 void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {

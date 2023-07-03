@@ -4,6 +4,27 @@ import pytest
 
 import fastfilters2
 
+
+def idfn(val):
+    if isinstance(val, tuple):
+        return "x".join(map(str, val))
+
+
+parametrize_filters = pytest.mark.parametrize(
+    "shape, scale",
+    [
+        *[
+            (shape, scale)
+            for shape in [(512, 512), (64, 64, 64)]
+            for scale in [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0]
+        ],
+        ((2, 2), 0.3),
+        ((2, 2, 2), 0.3),
+    ],
+    ids=idfn,
+)
+
+
 # Kernel values are extracted from the original fastfilters library.
 KERNELS_TEXT = """
 0.3 0 0x1.fc125ap-1 0x1.f6d37ap-9
@@ -44,11 +65,6 @@ def random_array(shape):
     return RNG.integers(0, 256, size=shape, dtype=numpy.uint8).astype(numpy.float32)
 
 
-def idfn(val):
-    if isinstance(val, tuple):
-        return "x".join(map(str, val))
-
-
 class TestGaussianKernel:
     @pytest.mark.parametrize("order", [0, 1, 2])
     @pytest.mark.parametrize("scale", [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0])
@@ -71,14 +87,25 @@ class TestGaussianKernel:
             fastfilters2.gaussian_kernel(1, order)
 
 
-@pytest.mark.parametrize("scale", [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0])
-@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
+@parametrize_filters
 class TestFilters:
     def test_gaussian_smoothing(self, shape, scale):
-        data = random_array(shape)
-        actual = fastfilters2.gaussian_smoothing(data, scale)
-        desired = fastfilters.gaussianSmoothing(data, scale)
+        src = random_array(shape)
+        actual = fastfilters2.gaussian_smoothing(src, scale)
+        desired = fastfilters.gaussianSmoothing(src, scale)
         numpy.testing.assert_array_almost_equal_nulp(actual, desired, nulp=4)
+
+
+@pytest.mark.parametrize(
+    "shape, scale",
+    [((2,), 0.3), ((1, 1), 0.3), ((1, 1, 1), 0.3), ((2, 2, 2, 2), 0.3)],
+    ids=idfn,
+)
+class TestInvalidFilters:
+    def test_gaussian_smoothing(self, shape, scale):
+        src = random_array(shape)
+        with pytest.raises(ValueError):
+            fastfilters2.gaussian_smoothing(src, scale)
 
 
 @pytest.mark.skip(reason="not a bottleneck")
@@ -90,11 +117,11 @@ def bench_gaussian_kernel(benchmark, scale, order):
 @pytest.mark.parametrize("scale", [0.3, 10.0])
 @pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
 class BenchFilters:
-    @pytest.mark.skip(reason="Temporarily disabled for faster benchmarking")
+    # @pytest.mark.skip(reason="Temporarily disabled for faster benchmarking")
     def bench_fastfilters1_gaussian_smoothing(self, benchmark, shape, scale):
-        data = random_array(shape)
-        benchmark(fastfilters.gaussianSmoothing, data, scale)
+        src = random_array(shape)
+        benchmark(fastfilters.gaussianSmoothing, src, scale)
 
     def bench_fastfilters2_gaussian_smoothing(self, benchmark, shape, scale):
-        data = random_array(shape)
-        benchmark(fastfilters2.gaussian_smoothing, data, scale)
+        src = random_array(shape)
+        benchmark(fastfilters2.gaussian_smoothing, src, scale)

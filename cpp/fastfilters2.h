@@ -18,7 +18,6 @@ using ssize_ptr = const ssize_t *HWY_RESTRICT;
 ssize_t kernel_radius(double scale, ssize_t order);
 void gaussian_kernel(mut_ptr kernel, ssize_t size, double scale, ssize_t order);
 
-ssize_t batch_size();
 void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale);
 
 } // namespace fastfilters2
