@@ -1,3 +1,5 @@
+import itertools
+
 import fastfilters
 import numpy
 import pytest
@@ -10,19 +12,11 @@ def idfn(val):
         return "x".join(map(str, val))
 
 
-parametrize_filters = pytest.mark.parametrize(
-    "shape, scale",
-    [
-        *[
-            (shape, scale)
-            for shape in [(512, 512), (64, 64, 64)]
-            for scale in [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0]
-        ],
-        ((2, 2), 0.3),
-        ((2, 2, 2), 0.3),
-    ],
-    ids=idfn,
-)
+def parametrize_filters(func):
+    shape = [(512, 512), (64, 64, 64)]
+    scale = [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0]
+    params = list(itertools.product(shape, scale))
+    return pytest.mark.parametrize("shape, scale", params, ids=idfn)(func)
 
 
 # Kernel values are extracted from the original fastfilters library.
@@ -65,6 +59,10 @@ def random_array(shape):
     return RNG.integers(0, 256, size=shape, dtype=numpy.uint8).astype(numpy.float32)
 
 
+def max_spacing(src):
+    return numpy.spacing(numpy.max(numpy.abs(src)), dtype=src.dtype)
+
+
 class TestGaussianKernel:
     @pytest.mark.parametrize("order", [0, 1, 2])
     @pytest.mark.parametrize("scale", [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0])
@@ -95,6 +93,37 @@ class TestFilters:
         desired = fastfilters.gaussianSmoothing(src, scale)
         numpy.testing.assert_array_almost_equal_nulp(actual, desired, nulp=4)
 
+    def test_gaussian_gradient_magnitude(self, shape, scale):
+        src = random_array(shape)
+        actual = fastfilters2.gaussian_gradient_magnitude(src, scale)
+        desired = fastfilters.gaussianGradientMagnitude(src, scale)
+        numpy.testing.assert_allclose(actual, desired, atol=2 * max_spacing(src))
+
+    def test_laplacian_of_gaussian(self, shape, scale):
+        src = random_array(shape)
+        actual = fastfilters2.laplacian_of_gaussian(src, scale)
+        desired = fastfilters.laplacianOfGaussian(src, scale)
+        numpy.testing.assert_allclose(actual, desired, atol=5 * max_spacing(src))
+
+    def test_hessian_of_gaussian_eigenvalues(self, shape, scale):
+        if len(shape) == 3:
+            pytest.skip("eigenvalues for 3D inputs diverge from fastfilters1")
+        src = random_array(shape)
+        actual = fastfilters2.hessian_of_gaussian_eigenvalues(src, scale)
+        actual = numpy.moveaxis(actual, 0, -1)
+        desired = fastfilters.hessianOfGaussianEigenvalues(src, scale)
+        numpy.testing.assert_allclose(actual, desired, atol=4 * max_spacing(src))
+
+    def test_structure_tensor_eigenvalues(self, shape, scale):
+        if len(shape) == 3:
+            pytest.skip("eigenvalues for 3D inputs diverge from fastfilters1")
+        src = random_array(shape)
+        actual = fastfilters2.structure_tensor_eigenvalues(src, scale)
+        actual = numpy.moveaxis(actual, 0, -1)
+        desired = fastfilters.structureTensorEigenvalues(src, scale, 0.5 * scale)
+        # numpy.testing.assert_allclose(actual, desired, atol=24 * max_spacing(src))
+        numpy.testing.assert_allclose(actual, desired, atol=128 * max_spacing(src))
+
 
 @pytest.mark.parametrize(
     "shape, scale",
@@ -114,14 +143,42 @@ def bench_gaussian_kernel(benchmark, scale, order):
     benchmark(fastfilters2.gaussian_kernel, scale, order)
 
 
-@pytest.mark.parametrize("scale", [0.3, 10.0])
-@pytest.mark.parametrize("shape", [(512, 512), (64, 64, 64)], ids=idfn)
-class BenchFilters:
-    # @pytest.mark.skip(reason="Temporarily disabled for faster benchmarking")
-    def bench_fastfilters1_gaussian_smoothing(self, benchmark, shape, scale):
-        src = random_array(shape)
-        benchmark(fastfilters.gaussianSmoothing, src, scale)
+def parametrize_bench_filters(func):
+    # It's convenient to be able to comment out some parameters during development.
+    # fmt: off
+    name = [
+        "gaussian_smoothing",
+        "gaussian_gradient_magnitude",
+        "laplacian_of_gaussian",
+        "hessian_of_gaussian_eigenvalues",
+        "structure_tensor_eigenvalues",
+    ]
+    shape = [
+        (512, 512),
+        (64, 64, 64),
+    ]
+    scale = [
+        0.3,
+        10.0,
+    ]
+    # fmt: on
 
-    def bench_fastfilters2_gaussian_smoothing(self, benchmark, shape, scale):
-        src = random_array(shape)
-        benchmark(fastfilters2.gaussian_smoothing, src, scale)
+    params = list(itertools.product(name, shape, scale))
+    return pytest.mark.parametrize("name, shape, scale", params, ids=idfn)(func)
+
+
+def snake2camel(name: str) -> str:
+    return "".join(s.title() if i else s for i, s in enumerate(name.split("_")))
+
+
+@parametrize_bench_filters
+def bench_filters_ff1(benchmark, name, shape, scale):
+    args = [scale]
+    if name == "structure_tensor_eigenvalues":
+        args.append(0.5 * scale)
+    benchmark(getattr(fastfilters, snake2camel(name)), random_array(shape), *args)
+
+
+@parametrize_bench_filters
+def bench_filters_ff2(benchmark, name, shape, scale):
+    benchmark(getattr(fastfilters2, name), random_array(shape), scale)

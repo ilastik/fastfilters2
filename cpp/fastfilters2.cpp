@@ -10,10 +10,10 @@
 // Comma-separated list of names.
 // Used for declare multiple variables and passing them to varidic functions.
 #ifndef ARGLIST
-#define ARGLIST                                                                                    \
-    _arg00, _arg01, _arg02, _arg03, _arg04, _arg05, _arg06, _arg07, _arg08, _arg09, _arg10,        \
-            _arg11, _arg12, _arg13, _arg14, _arg15, _arg16, _arg17, _arg18, _arg19, _arg20,        \
-            _arg21, _arg22, _arg23, _arg24, _arg25, _arg26, _arg27, _arg28, _arg29, _arg30, _arg31
+#define ARGLIST                                                                                                        \
+    _arg00, _arg01, _arg02, _arg03, _arg04, _arg05, _arg06, _arg07, _arg08, _arg09, _arg10, _arg11, _arg12, _arg13,    \
+            _arg14, _arg15, _arg16, _arg17, _arg18, _arg19, _arg20, _arg21, _arg22, _arg23, _arg24, _arg25, _arg26,    \
+            _arg27, _arg28, _arg29, _arg30, _arg31
 #endif
 
 // Recursive include machinery that re-includes this file for each target.
@@ -32,7 +32,6 @@ HWY_BEFORE_NAMESPACE();
 namespace fastfilters2::HWY_NAMESPACE {
 namespace hn = hwy::HWY_NAMESPACE;
 
-namespace ff2 = fastfilters2;
 namespace util = fastfilters2::util;
 
 // Maximum lane size is capped to 64 bytes: this is the most common cache line size.
@@ -131,13 +130,7 @@ void gaussian_kernel(mut_ptr kernel, ssize_t radius, double scale, ssize_t order
  * X[0], X[1], X[2], X[1], X[0], X[-1] (multiply indices by stride if stride > 1).
  */
 template <ssize_t Order, bool Contiguous = false>
-void conv_batch(ptr src,
-                mut_ptr dst,
-                ptr kernel,
-                ssize_t radius,
-                ssize_t stride,
-                ssize_t lborder,
-                ssize_t rborder) {
+void conv_batch(ptr src, mut_ptr dst, ptr kernel, ssize_t radius, ssize_t stride, ssize_t lborder, ssize_t rborder) {
 
     HWY_ASSUME(radius > 0);
 
@@ -147,9 +140,8 @@ void conv_batch(ptr src,
 
     // Initialize accumulators with central elements: src[0] * kernel[0].
     hn::VFromD<D> ARGLIST;
-    util::static_for<Unroll>(
-            [&](auto idx, auto &vec) { vec = hn::Mul(hn::LoadU(d, src + idx * lanes), kvec); },
-            ARGLIST);
+    util::static_for<Unroll>([&](auto idx, auto &vec) { vec = hn::Mul(hn::LoadU(d, src + idx * lanes), kvec); },
+                             ARGLIST);
 
     // Pointers for the left and right sides.
     auto lsrc = src;
@@ -187,18 +179,243 @@ void conv_batch(ptr src,
     }
 
     // Write accumulators to the destination.
-    util::static_for<Unroll>(
-            [&](auto idx, const auto &vec) { hn::StoreU(vec, d, dst + idx * lanes); }, ARGLIST);
+    util::static_for<Unroll>([&](auto idx, const auto &vec) { hn::StoreU(vec, d, dst + idx * lanes); }, ARGLIST);
+}
+
+void add2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
+    D d;
+    ssize_t step = hn::Lanes(d);
+
+    for (ssize_t i = 0; i < size; i += step) {
+        i = HWY_MIN(i, size - step);
+
+        auto vec1 = hn::LoadU(d, src1 + i);
+        auto vec2 = hn::LoadU(d, src2 + i);
+
+        auto out = hn::Add(vec1, vec2);
+        hn::StoreU(out, d, dst + i);
+    }
+}
+
+void add3(ptr src1, ptr src2, ptr src3, mut_ptr dst, ssize_t size) {
+    D d;
+    ssize_t step = hn::Lanes(d);
+
+    for (ssize_t i = 0; i < size; i += step) {
+        i = HWY_MIN(i, size - step);
+
+        auto vec1 = hn::LoadU(d, src1 + i);
+        auto vec2 = hn::LoadU(d, src2 + i);
+        auto vec3 = hn::LoadU(d, src3 + i);
+
+        auto out = hn::Add(hn::Add(vec1, vec2), vec3);
+        hn::StoreU(out, d, dst + i);
+    }
+}
+
+void mul2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
+    D d;
+    ssize_t step = hn::Lanes(d);
+
+    for (ssize_t i = 0; i < size; i += step) {
+        i = HWY_MIN(i, size - step);
+
+        auto vec1 = hn::LoadU(d, src1 + i);
+        auto vec2 = hn::LoadU(d, src2 + i);
+
+        auto out = hn::Mul(vec1, vec2);
+        hn::StoreU(out, d, dst + i);
+    }
+}
+
+void l2norm2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
+    D d;
+    ssize_t step = hn::Lanes(d);
+
+    for (ssize_t i = 0; i < size; i += step) {
+        i = HWY_MIN(i, size - step);
+
+        auto vec1 = hn::LoadU(d, src1 + i);
+        auto vec2 = hn::LoadU(d, src2 + i);
+
+        vec1 = hn::Mul(vec1, vec1);
+        vec2 = hn::Mul(vec2, vec2);
+
+        auto out = hn::Sqrt(hn::Add(vec1, vec2));
+        hn::StoreU(out, d, dst + i);
+    }
+}
+
+void l2norm3(ptr src1, ptr src2, ptr src3, mut_ptr dst, ssize_t size) {
+    D d;
+    ssize_t step = hn::Lanes(d);
+
+    for (ssize_t i = 0; i < size; i += step) {
+        i = HWY_MIN(i, size - step);
+
+        auto vec1 = hn::LoadU(d, src1 + i);
+        auto vec2 = hn::LoadU(d, src2 + i);
+        auto vec3 = hn::LoadU(d, src3 + i);
+
+        vec1 = hn::Mul(vec1, vec1);
+        vec2 = hn::Mul(vec2, vec2);
+        vec3 = hn::Mul(vec3, vec3);
+
+        auto out = hn::Sqrt(hn::Add(hn::Add(vec1, vec2), vec3));
+        hn::StoreU(out, d, dst + i);
+    }
+}
+
+void eigenvalues2(ptr src00, ptr src01, ptr src11, mut_ptr dst, ssize_t size) {
+    D d;
+    ssize_t step = hn::Lanes(d);
+
+    mut_ptr dst0 = dst;
+    mut_ptr dst1 = dst + size;
+
+    for (ssize_t i = 0; i < size; i += step) {
+        i = HWY_MIN(i, size - step);
+
+        auto vec00 = hn::LoadU(d, src00 + i);
+        auto vec01 = hn::LoadU(d, src01 + i);
+        auto vec11 = hn::LoadU(d, src11 + i);
+
+        auto tmp0 = hn::Mul(hn::Add(vec00, vec11), hn::Set(d, 0.5));
+
+        auto tmp1 = hn::Mul(hn::Sub(vec00, vec11), hn::Set(d, 0.5));
+        tmp1 = hn::Mul(tmp1, tmp1);
+
+        auto det = hn::Sqrt(hn::Add(tmp1, hn::Mul(vec01, vec01)));
+
+        hn::StoreU(hn::Add(tmp0, det), d, dst0 + i);
+        hn::StoreU(hn::Sub(tmp0, det), d, dst1 + i);
+    }
+}
+
+/**
+ * Implementation adapted from https://mazzo.li/posts/vectorized-atan2.html
+ */
+template <typename D, typename V> HWY_INLINE V Atan2(D d, V y, V x) {
+    auto pi = hn::Set(d, 3.141592653589793);
+    auto halfpi = hn::Set(d, 1.5707963267948966);
+
+    auto swapmask = hn::Gt(hn::Abs(y), hn::Abs(x));
+    auto input = hn::Div(hn::IfThenElse(swapmask, x, y), hn::IfThenElse(swapmask, y, x));
+    auto result = hn::Atan(d, input);
+    result = hn::IfThenElse(swapmask, hn::Sub(hn::CopySignToAbs(halfpi, input), result), result);
+    result = hn::Add(hn::IfNegativeThenElse(x, hn::CopySignToAbs(pi, y), hn::Zero(d)), result);
+
+    return result;
+}
+
+void eigenvalues3(ptr src00, ptr src01, ptr src02, ptr src11, ptr src12, ptr src22, mut_ptr dst, ssize_t size) {
+    mut_ptr dst0 = dst;
+    mut_ptr dst1 = dst + size;
+    mut_ptr dst2 = dst + 2 * size;
+
+    D d;
+    ssize_t step = hn::Lanes(d);
+
+    auto v_inv3 = hn::Set(d, 1.0 / 3.0);
+    auto v_root3 = hn::Sqrt(hn::Set(d, 3.0));
+    auto two = hn::Set(d, 2.0);
+    auto one = hn::Set(d, 1.0);
+    auto half = hn::Set(d, 0.5);
+    auto zero = hn::Zero(d);
+
+    for (ssize_t i = 0; i < size; i += step) {
+        i = HWY_MIN(i, size - step);
+
+        // clang-format off
+
+        auto v_a00 = hn::LoadU(d, src00 + i);
+        auto v_a01 = hn::LoadU(d, src01 + i);
+        auto v_a02 = hn::LoadU(d, src02 + i);
+        auto v_a11 = hn::LoadU(d, src11 + i);
+        auto v_a12 = hn::LoadU(d, src12 + i);
+        auto v_a22 = hn::LoadU(d, src22 + i);
+
+        // guard against float overflows
+        auto v_max0 = hn::Max(hn::Abs(v_a00), hn::Abs(v_a01));
+        auto v_max1 = hn::Max(hn::Abs(v_a02), hn::Abs(v_a11));
+        auto v_max2 = hn::Max(hn::Abs(v_a12), hn::Abs(v_a22));
+        auto v_max_element = hn::Max(hn::Max(v_max0, v_max1), v_max2);
+
+        // replace zeros with ones to avoid NaNs
+        // OLD:
+        // v_max_element = _mm256_or_ps(v_max_element, _mm256_and_ps(one, _mm256_cmp_ps(v_max_element, zero, _CMP_EQ_UQ)));
+        // NEW:
+        v_max_element = hn::IfThenElse(hn::Eq(v_max_element, zero), one, v_max_element);
+
+        v_a00 = hn::Div(v_a00, v_max_element);
+        v_a01 = hn::Div(v_a01, v_max_element);
+        v_a02 = hn::Div(v_a02, v_max_element);
+        v_a11 = hn::Div(v_a11, v_max_element);
+        v_a12 = hn::Div(v_a12, v_max_element);
+        v_a22 = hn::Div(v_a22, v_max_element);
+
+        auto c0 = hn::Sub(hn::Sub(hn::Sub(hn::Add(hn::Mul(hn::Mul(v_a00, v_a11), v_a22),
+            hn::Mul(hn::Mul(hn::Mul(two, v_a01), v_a02), v_a12)),
+            hn::Mul(hn::Mul(v_a00, v_a12), v_a12)),
+            hn::Mul(hn::Mul(v_a11, v_a02), v_a02)),
+            hn::Mul(hn::Mul(v_a22, v_a01), v_a01));
+        auto c1 = hn::Sub(hn::Add(hn::Sub(hn::Add(hn::Sub(hn::Mul(v_a00, v_a11),
+            hn::Mul(v_a01, v_a01)),
+            hn::Mul(v_a00, v_a22)),
+            hn::Mul(v_a02, v_a02)),
+            hn::Mul(v_a11, v_a22)),
+            hn::Mul(v_a12, v_a12));
+        auto c2 = hn::Add(hn::Add(v_a00, v_a11), v_a22);
+        auto c2Div3 = hn::Mul(c2, v_inv3);
+        auto aDiv3 = hn::Mul(hn::Sub(c1, hn::Mul(c2, c2Div3)), v_inv3);
+
+        aDiv3 = hn::Min(aDiv3, zero);
+
+        auto mbDiv2 = hn::Mul(half, hn::Add(c0, hn::Mul(c2Div3, hn::Sub(hn::Mul(hn::Mul(two, c2Div3), c2Div3), c1))));
+        auto q = hn::Add(hn::Mul(mbDiv2, mbDiv2), hn::Mul(hn::Mul(aDiv3, aDiv3), aDiv3));
+
+        q = hn::Min(q, zero);
+
+        auto magnitude = hn::Sqrt(hn::Neg(aDiv3));
+        // OLD:
+        // hn::VFromD<D> angle = hn::Mul(atan2_256_ps(hn::Sqrt(hn::Neg(q)), mbDiv2), v_inv3);
+        // NEW:
+        auto angle = hn::Mul(Atan2(d, hn::Sqrt(hn::Neg(q)), mbDiv2), v_inv3);
+
+        hn::VFromD<D> cs, sn;
+        // OLD:
+        // sincos256_ps(angle, &sn, &cs);
+        // NEW:
+        sn = hn::Sin(d, angle);
+        cs = hn::Cos(d, angle);
+
+        auto r0 = hn::Add(c2Div3, hn::Mul(hn::Mul(two, magnitude), cs));
+        auto r1 = hn::Sub(c2Div3, hn::Mul(magnitude, hn::Add(cs, hn::Mul(v_root3, sn))));
+        auto r2 = hn::Sub(c2Div3, hn::Mul(magnitude, hn::Sub(cs, hn::Mul(v_root3, sn))));
+
+        auto v_r0_tmp = hn::Min(r0, r1);
+        auto v_r1_tmp = hn::Max(r0, r1);
+
+        auto v_r0 = hn::Min(v_r0_tmp, r2);
+        auto v_r2_tmp = hn::Max(v_r0_tmp, r2);
+
+        auto v_r1 = hn::Min(v_r1_tmp, v_r2_tmp);
+        auto v_r2 = hn::Max(v_r1_tmp, v_r2_tmp);
+
+        v_r0 = hn::Mul(v_r0, v_max_element);
+        v_r1 = hn::Mul(v_r1, v_max_element);
+        v_r2 = hn::Mul(v_r2, v_max_element);
+
+        hn::StoreU(v_r0, d, dst2 + i);
+        hn::StoreU(v_r1, d, dst1 + i);
+        hn::StoreU(v_r2, d, dst0 + i);
+
+        // clang-format on
+    }
 }
 
 template <ssize_t Order>
-void conv_x(ptr src,
-            mut_ptr dst,
-            ssize_ptr shape,
-            ssize_t ndim,
-            ptr kernel,
-            ssize_t radius,
-            mut_ptr buf) {
+void conv_x(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, ptr kernel, ssize_t radius, mut_ptr buf) {
 
     ssize_t step = batch_size();
     auto outer_size = ndim == 2 ? shape[0] : shape[0] * shape[1];
@@ -214,13 +431,7 @@ void conv_x(ptr src,
 }
 
 template <ssize_t Order>
-void conv_y(ptr src,
-            mut_ptr dst,
-            ssize_ptr shape,
-            ssize_t ndim,
-            ptr kernel,
-            ssize_t radius,
-            mut_ptr buf) {
+void conv_y(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, ptr kernel, ssize_t radius, mut_ptr buf) {
 
     // Buffer is not needed for strided convolution, but accept it as a parameter anyway
     // in order to keep the function signature identical to conv_contig.
@@ -245,13 +456,7 @@ void conv_y(ptr src,
 }
 
 template <ssize_t Order>
-void conv_z(ptr src,
-            mut_ptr dst,
-            ssize_ptr shape,
-            ssize_t ndim,
-            ptr kernel,
-            ssize_t radius,
-            mut_ptr buf) {
+void conv_z(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, ptr kernel, ssize_t radius, mut_ptr buf) {
 
     // Buffer is not needed for strided convolution, but accept it as a parameter anyway
     // in order to keep the function signature identical to conv_contig.
@@ -307,7 +512,7 @@ struct context {
         temp_size *= min_size;
 
         for (ssize_t i = 0; i < N; ++i) {
-            radius[i] = ff2::kernel_radius(scale, i);
+            radius[i] = fastfilters2::kernel_radius(scale, i);
             cache[i] = hwy::AllocateAligned<val_t>(radius[i] + 1);
             gaussian_kernel(cache[i].get(), radius[i], scale, i);
         }
@@ -352,238 +557,238 @@ struct context {
 void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
     context ctx{src, dst, shape, ndim, scale};
 
-    mut_ptr tmp1 = ctx.allocate();
-    mut_ptr tmp2 = ndim == 2 ? ctx.dst() : ctx.allocate();
+    if (ndim == 2) {
+        mut_ptr tmp = ctx.allocate();
 
-    ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-    ctx.conv<0>(ndim - 2, tmp1, tmp2);
-    if (ndim == 3) {
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<0>(ndim - 2, tmp, ctx.dst());
+
+    } else {
+        mut_ptr tmp1 = ctx.allocate();
+        mut_ptr tmp2 = ctx.allocate();
+
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
         ctx.conv<0>(ndim - 3, tmp2, ctx.dst());
     }
 }
 
-// /**
-//  * Implementation adapted from https://mazzo.li/posts/vectorized-atan2.html
-//  */
-// template <typename D, typename V> HWY_INLINE V Atan2(D d, V y, V x) {
-//     auto pi = hn::Set(d, 3.141592653589793);
-//     auto halfpi = hn::Set(d, 1.5707963267948966);
+void gaussian_gradient_magnitude(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    context ctx{src, dst, shape, ndim, scale};
 
-//     auto swapmask = hn::Gt(hn::Abs(y), hn::Abs(x));
-//     auto input = hn::Div(hn::IfThenElse(swapmask, x, y), hn::IfThenElse(swapmask, y, x));
-//     auto result = hn::Atan(d, input);
-//     result = hn::IfThenElse(swapmask, hn::Sub(hn::CopySignToAbs(halfpi, input), result), result);
-//     result = hn::Add(hn::IfNegativeThenElse(x, hn::CopySignToAbs(pi, y), hn::Zero(d)), result);
+    if (ndim == 2) {
+        mut_ptr tmp = ctx.allocate();
+        mut_ptr x1y0 = ctx.allocate();
+        mut_ptr x0y1 = ctx.allocate();
 
-//     return result;
-// }
+        ctx.conv<1>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<0>(ndim - 2, tmp, x1y0);
 
-// template <typename Func> HWY_INLINE void apply(Func func, mut_rptr dst, size_t size) {
-//     D d;
-//     auto step = hn::Lanes(d);
-//     for (ssize_t i = 0; i < size; i += step) {
-//         i = HWY_MIN(i, size - step);
-//         hn::StoreU(func(i), d, dst + i);
-//     }
-// }
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<1>(ndim - 2, tmp, x0y1);
 
-// void add2(rptr src1, rptr src2, mut_rptr dst, ssize_t size) {
-//     D d;
-//     apply([&](ssize_t i) { return hn::Add(hn::LoadU(d, src1 + i), hn::LoadU(d, src2 + i)); },
-//           dst,
-//           size);
-// }
+        l2norm2(x1y0, x0y1, ctx.dst(), ctx.temp_size);
 
-// void add3(rptr src1, rptr src2, rptr src3, mut_rptr dst, ssize_t size) {
-//     D d;
-//     apply(
-//             [&](ssize_t i) {
-//                 return hn::Add(hn::Add(hn::LoadU(d, src1 + i), hn::LoadU(d, src2 + i)),
-//                                hn::LoadU(d, src3 + i));
-//             },
-//             dst,
-//             size);
-// }
+    } else {
+        mut_ptr tmp1 = ctx.allocate();
+        mut_ptr tmp2 = ctx.allocate();
+        mut_ptr x1y0z0 = ctx.allocate();
+        mut_ptr x0y1z0 = ctx.allocate();
+        mut_ptr x0y0z1 = ctx.allocate();
 
-// pointer<D> mul(pointer<D> dst,
-//                const_pointer<D> src1,
-//                const_pointer<D> src2,
-//                const_pointer<D> src3,
-//                size_t size) {
-//     D d;
-//     auto lanes = hn::Lanes(d);
-//     if (src3 == nullptr) {
-//         for (size_t i = 0; i < size; i += lanes) {
-//             hn::Store(hn::Mul(hn::Load(d, src1 + i), hn::Load(d, src2 + i)), d, dst + i);
-//         }
-//     } else {
-//         for (size_t i = 0; i < size; i += lanes) {
-//             hn::Store(hn::Mul(hn::Mul(hn::Load(d, src1 + i), hn::Load(d, src2 + i)),
-//                               hn::Load(d, src3 + i)),
-//                       d,
-//                       dst + i);
-//         }
-//     }
-//     return dst;
-// }
+        ctx.conv<1>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, x1y0z0);
 
-// pointer<D> l2norm(pointer<D> dst,
-//                   const_pointer<D> src1,
-//                   const_pointer<D> src2,
-//                   const_pointer<D> src3,
-//                   size_t size) {
-//     D d;
-//     auto lanes = hn::Lanes(d);
-//     if (src3 == nullptr) {
-//         for (size_t i = 0; i < size; i += lanes) {
-//             auto v1 = hn::Load(d, src1 + i);
-//             auto v2 = hn::Load(d, src2 + i);
-//             v1 = hn::Mul(v1, v1);
-//             v2 = hn::Mul(v2, v2);
-//             hn::Store(hn::Sqrt(hn::Add(v1, v2)), d, dst + i);
-//         }
-//     } else {
-//         for (size_t i = 0; i < size; i += lanes) {
-//             auto v1 = hn::Load(d, src1 + i);
-//             auto v2 = hn::Load(d, src2 + i);
-//             auto v3 = hn::Load(d, src3 + i);
-//             v1 = hn::Mul(v1, v1);
-//             v2 = hn::Mul(v2, v2);
-//             v3 = hn::Mul(v3, v3);
-//             hn::Store(hn::Sqrt(hn::Add(hn::Add(v1, v2), v3)), d, dst + i);
-//         }
-//     }
-//     return dst;
-// }
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<1>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, x0y1z0);
 
-// void eigenvalues2(pointer<D> dst0,
-//                   pointer<D> dst1,
-//                   const_pointer<D> src00,
-//                   const_pointer<D> src01,
-//                   const_pointer<D> src11,
-//                   size_t size) {
-//     D d;
-//     auto lanes = hn::Lanes(d);
-//     auto onehalf = hn::Set(d, 0.5);
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<1>(ndim - 3, tmp2, x0y0z1);
 
-//     for (size_t i = 0; i < size; i += lanes) {
-//         auto vec00 = hn::Load(d, src00 + i);
-//         auto vec01 = hn::Load(d, src01 + i);
-//         auto vec11 = hn::Load(d, src11 + i);
+        l2norm3(x1y0z0, x0y1z0, x0y0z1, ctx.dst(), ctx.temp_size);
+    }
+}
 
-//         auto tmp0 = hn::Mul(hn::Add(vec00, vec11), onehalf);
+void laplacian_of_gaussian(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    context ctx{src, dst, shape, ndim, scale};
 
-//         auto tmp1 = hn::Mul(hn::Sub(vec00, vec11), onehalf);
-//         tmp1 = hn::Mul(tmp1, tmp1);
+    if (ndim == 2) {
+        mut_ptr tmp = ctx.allocate();
+        mut_ptr x2y0 = ctx.allocate();
+        mut_ptr x0y2 = ctx.allocate();
 
-//         auto det = hn::Sqrt(hn::Add(tmp1, hn::Mul(vec01, vec01)));
+        ctx.conv<2>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<0>(ndim - 2, tmp, x2y0);
 
-//         hn::Store(hn::Add(tmp0, det), d, dst0 + i);
-//         hn::Store(hn::Sub(tmp0, det), d, dst1 + i);
-//     }
-// }
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<2>(ndim - 2, tmp, x0y2);
 
-// void eigenvalues3(pointer<D> ev0,
-//                   pointer<D> ev1,
-//                   pointer<D> ev2,
-//                   const_pointer<D> a00,
-//                   const_pointer<D> a01,
-//                   const_pointer<D> a02,
-//                   const_pointer<D> a11,
-//                   const_pointer<D> a12,
-//                   const_pointer<D> a22,
-//                   size_t size) {
+        add2(x2y0, x0y2, ctx.dst(), ctx.temp_size);
 
-//     D d;
-//     auto lanes = hn::Lanes(d);
+    } else {
+        mut_ptr tmp1 = ctx.allocate();
+        mut_ptr tmp2 = ctx.allocate();
+        mut_ptr x2y0z0 = ctx.allocate();
+        mut_ptr x0y2z0 = ctx.allocate();
+        mut_ptr x0y0z2 = ctx.allocate();
 
-//     auto v_inv3 = hn::Set(d, 1.0 / 3);
-//     auto v_root3 = hn::Sqrt(hn::Set(d, 3));
-//     auto two = hn::Set(d, 2);
-//     auto one = hn::Set(d, 1);
-//     auto half = hn::Set(d, 0.5);
-//     auto zero = hn::Zero(d);
+        ctx.conv<2>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, x2y0z0);
 
-//     for (size_t i = 0; i < size; i += lanes) {
-//         auto v_a00 = hn::Load(d, a00 + i);
-//         auto v_a01 = hn::Load(d, a01 + i);
-//         auto v_a02 = hn::Load(d, a02 + i);
-//         auto v_a11 = hn::Load(d, a11 + i);
-//         auto v_a12 = hn::Load(d, a12 + i);
-//         auto v_a22 = hn::Load(d, a22 + i);
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<2>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, x0y2z0);
 
-//         // guard against float overflows
-//         auto v_max0 = hn::Max(hn::Abs(v_a00), hn::Abs(v_a01));
-//         auto v_max1 = hn::Max(hn::Abs(v_a02), hn::Abs(v_a11));
-//         auto v_max2 = hn::Max(hn::Abs(v_a12), hn::Abs(v_a22));
-//         auto v_max_element = hn::Max(hn::Max(v_max0, v_max1), v_max2);
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<2>(ndim - 3, tmp2, x0y0z2);
 
-//         // replace zeros with ones to avoid NaNs
-//         v_max_element = hn::IfThenElse(hn::Eq(v_max_element, zero), one, v_max_element);
+        add3(x2y0z0, x0y2z0, x0y0z2, ctx.dst(), ctx.temp_size);
+    }
+}
 
-//         v_a00 = hn::Div(v_a00, v_max_element);
-//         v_a01 = hn::Div(v_a01, v_max_element);
-//         v_a02 = hn::Div(v_a02, v_max_element);
-//         v_a11 = hn::Div(v_a11, v_max_element);
-//         v_a12 = hn::Div(v_a12, v_max_element);
-//         v_a22 = hn::Div(v_a22, v_max_element);
+void hessian_of_gaussian_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    context ctx{src, dst, shape, ndim, scale};
 
-//         // clang-format off
-//         auto c0 = hn::Sub(hn::Sub(hn::Sub(hn::Add(hn::Mul(hn::Mul(v_a00, v_a11), v_a22),
-//             hn::Mul(hn::Mul(hn::Mul(two, v_a01), v_a02), v_a12)),
-//             hn::Mul(hn::Mul(v_a00, v_a12), v_a12)),
-//             hn::Mul(hn::Mul(v_a11, v_a02), v_a02)),
-//             hn::Mul(hn::Mul(v_a22, v_a01), v_a01));
-//         auto c1 = hn::Sub(hn::Add(hn::Sub(hn::Add(hn::Sub(hn::Mul(v_a00, v_a11),
-//             hn::Mul(v_a01, v_a01)),
-//             hn::Mul(v_a00, v_a22)),
-//             hn::Mul(v_a02, v_a02)),
-//             hn::Mul(v_a11, v_a22)),
-//             hn::Mul(v_a12, v_a12));
-//         auto c2 = hn::Add(hn::Add(v_a00, v_a11), v_a22);
-//         auto c2Div3 = hn::Mul(c2, v_inv3);
-//         auto aDiv3 = hn::Mul(hn::Sub(c1, hn::Mul(c2, c2Div3)), v_inv3);
-//         // clang-format on
+    if (ndim == 2) {
+        mut_ptr tmp = ctx.allocate();
+        mut_ptr xx = ctx.allocate();
+        mut_ptr xy = ctx.allocate();
+        mut_ptr yy = ctx.allocate();
 
-//         aDiv3 = hn::Min(aDiv3, zero);
+        ctx.conv<2>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<0>(ndim - 2, tmp, xx);
 
-//         auto mbDiv2 = hn::Mul(
-//                 half,
-//                 hn::Add(c0, hn::Mul(c2Div3, hn::Sub(hn::Mul(hn::Mul(two, c2Div3), c2Div3),
-//                 c1))));
-//         auto q = hn::Add(hn::Mul(mbDiv2, mbDiv2), hn::Mul(hn::Mul(aDiv3, aDiv3), aDiv3));
+        ctx.conv<1>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<1>(ndim - 2, tmp, xy);
 
-//         q = hn::Min(q, zero);
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<2>(ndim - 2, tmp, yy);
 
-//         auto magnitude = hn::Sqrt(hn::Neg(aDiv3));
-//         auto angle = hn::Mul(Atan2(d, hn::Sqrt(hn::Neg(q)), mbDiv2), v_inv3);
+        eigenvalues2(xx, xy, yy, ctx.dst(), ctx.temp_size);
 
-//         // TODO: Compute cos and sin in one step.
-//         auto cs = hn::Cos(d, angle);
-//         auto sn = hn::Sin(d, angle);
+    } else {
+        mut_ptr tmp1 = ctx.allocate();
+        mut_ptr tmp2 = ctx.allocate();
+        mut_ptr xx = ctx.allocate();
+        mut_ptr xy = ctx.allocate();
+        mut_ptr xz = ctx.allocate();
+        mut_ptr yy = ctx.allocate();
+        mut_ptr yz = ctx.allocate();
+        mut_ptr zz = ctx.allocate();
 
-//         auto r0 = hn::Add(c2Div3, hn::Mul(hn::Mul(two, magnitude), cs));
-//         auto r1 = hn::Sub(c2Div3, hn::Mul(magnitude, hn::Add(cs, hn::Mul(v_root3, sn))));
-//         auto r2 = hn::Sub(c2Div3, hn::Mul(magnitude, hn::Sub(cs, hn::Mul(v_root3, sn))));
+        ctx.conv<2>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, xx);
 
-//         auto v_r0_tmp = hn::Min(r0, r1);
-//         auto v_r1_tmp = hn::Max(r0, r1);
+        ctx.conv<1>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<1>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, xy);
 
-//         auto v_r0 = hn::Min(v_r0_tmp, r2);
-//         auto v_r2_tmp = hn::Max(v_r0_tmp, r2);
+        ctx.conv<1>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<1>(ndim - 3, tmp2, xz);
 
-//         auto v_r1 = hn::Min(v_r1_tmp, v_r2_tmp);
-//         auto v_r2 = hn::Max(v_r1_tmp, v_r2_tmp);
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<2>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, yy);
 
-//         v_r0 = hn::Mul(v_r0, v_max_element);
-//         v_r1 = hn::Mul(v_r1, v_max_element);
-//         v_r2 = hn::Mul(v_r2, v_max_element);
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<1>(ndim - 2, tmp1, tmp2);
+        ctx.conv<1>(ndim - 3, tmp2, yz);
 
-//         hn::Store(v_r0, d, ev2 + i);
-//         hn::Store(v_r1, d, ev1 + i);
-//         hn::Store(v_r2, d, ev0 + i);
-//     }
-// }
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<2>(ndim - 3, tmp2, zz);
+
+        // eigenvalues3(xx, xy, xz, yy, yz, zz, ctx.dst(), ctx.temp_size);
+
+        // The old library used the following parameter order:
+        eigenvalues3(zz, yz, xz, yy, xy, xx, ctx.dst(), ctx.temp_size);
+    }
+}
+
+void structure_tensor_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    context ctx{src, dst, shape, ndim, scale / 2};
+
+    if (ndim == 2) {
+        mut_ptr tmp = ctx.allocate();
+        mut_ptr x1y0 = ctx.allocate();
+        mut_ptr x0y1 = ctx.allocate();
+        mut_ptr xx = ctx.allocate();
+        mut_ptr xy = ctx.allocate();
+        mut_ptr yy = ctx.allocate();
+
+        ctx.conv<1>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<0>(ndim - 2, tmp, x1y0);
+
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
+        ctx.conv<1>(ndim - 2, tmp, x0y1);
+
+        mul2(x1y0, x1y0, tmp, ctx.temp_size);
+        gaussian_smoothing(tmp, xx, shape, ndim, scale);
+
+        mul2(x1y0, x0y1, tmp, ctx.temp_size);
+        gaussian_smoothing(tmp, xy, shape, ndim, scale);
+
+        mul2(x0y1, x0y1, tmp, ctx.temp_size);
+        gaussian_smoothing(tmp, yy, shape, ndim, scale);
+
+        eigenvalues2(xx, xy, yy, ctx.dst(), ctx.temp_size);
+
+    } else {
+        mut_ptr tmp1 = ctx.allocate();
+        mut_ptr tmp2 = ctx.allocate();
+        mut_ptr x1y0z0 = ctx.allocate();
+        mut_ptr x0y1z0 = ctx.allocate();
+        mut_ptr x0y0z1 = ctx.allocate();
+        mut_ptr xx = ctx.allocate();
+        mut_ptr xy = ctx.allocate();
+        mut_ptr xz = ctx.allocate();
+        mut_ptr yy = ctx.allocate();
+        mut_ptr yz = ctx.allocate();
+        mut_ptr zz = ctx.allocate();
+
+        ctx.conv<1>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, x1y0z0);
+
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<1>(ndim - 2, tmp1, tmp2);
+        ctx.conv<0>(ndim - 3, tmp2, x0y1z0);
+
+        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
+        ctx.conv<0>(ndim - 2, tmp1, tmp2);
+        ctx.conv<1>(ndim - 3, tmp2, x0y0z1);
+
+        mul2(x1y0z0, x1y0z0, tmp1, ctx.temp_size);
+        gaussian_smoothing(tmp1, xx, shape, ndim, scale);
+
+        mul2(x1y0z0, x0y1z0, tmp1, ctx.temp_size);
+        gaussian_smoothing(tmp1, xy, shape, ndim, scale);
+
+        mul2(x1y0z0, x0y0z1, tmp1, ctx.temp_size);
+        gaussian_smoothing(tmp1, xz, shape, ndim, scale);
+
+        mul2(x0y1z0, x0y1z0, tmp1, ctx.temp_size);
+        gaussian_smoothing(tmp1, yy, shape, ndim, scale);
+
+        mul2(x0y1z0, x0y0z1, tmp1, ctx.temp_size);
+        gaussian_smoothing(tmp1, yz, shape, ndim, scale);
+
+        mul2(x0y0z1, x0y0z1, tmp1, ctx.temp_size);
+        gaussian_smoothing(tmp1, zz, shape, ndim, scale);
+
+        // eigenvalues3(xx, xy, xz, yy, yz, zz, ctx.dst(), ctx.temp_size);
+
+        // The old library used the following parameter order:
+        eigenvalues3(zz, yz, xz, yy, xy, xx, ctx.dst(), ctx.temp_size);
+    }
+}
 }; // namespace fastfilters2::HWY_NAMESPACE
 HWY_AFTER_NAMESPACE();
 
@@ -595,14 +800,6 @@ namespace fastfilters2 {
 // for all compiled targets from recusive includes.
 // The best implementation could be selected at runtime via HWY_DYNAMIC_DISPATCH.
 
-/**
- * Return radius of a Gaussian kernel for given scale (sigma) and order.
- * Order is the kernel derivative order (0, 1 or 2).
- * Total (virtual) size of a kernel: 2 * radius + 1.
- * The actual number of elements to be allocated: radius + 1 (central element and the right half).
- */
-ssize_t kernel_radius(double scale, ssize_t order) { return std::ceil((3 + 0.5 * order) * scale); }
-
 HWY_EXPORT(gaussian_kernel);
 void gaussian_kernel(mut_ptr kernel, ssize_t radius, double scale, ssize_t order) {
     HWY_DYNAMIC_DISPATCH(gaussian_kernel)(kernel, radius, scale, order);
@@ -613,5 +810,24 @@ void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, dou
     HWY_DYNAMIC_DISPATCH(gaussian_smoothing)(src, dst, shape, ndim, scale);
 }
 
+HWY_EXPORT(gaussian_gradient_magnitude);
+void gaussian_gradient_magnitude(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    HWY_DYNAMIC_DISPATCH(gaussian_gradient_magnitude)(src, dst, shape, ndim, scale);
+}
+
+HWY_EXPORT(laplacian_of_gaussian);
+void laplacian_of_gaussian(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    HWY_DYNAMIC_DISPATCH(laplacian_of_gaussian)(src, dst, shape, ndim, scale);
+}
+
+HWY_EXPORT(hessian_of_gaussian_eigenvalues);
+void hessian_of_gaussian_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    HWY_DYNAMIC_DISPATCH(hessian_of_gaussian_eigenvalues)(src, dst, shape, ndim, scale);
+}
+
+HWY_EXPORT(structure_tensor_eigenvalues);
+void structure_tensor_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
+    HWY_DYNAMIC_DISPATCH(structure_tensor_eigenvalues)(src, dst, shape, ndim, scale);
+}
 }; // namespace fastfilters2
 #endif

@@ -41,11 +41,7 @@ template <ssize_t N, typename Func, typename... Args> void static_for(Func func,
  * 4. If min_size > size, fill the rest of dst with zeros.
  */
 template <typename T>
-void reflect_copy(const T *HWY_RESTRICT src,
-                  T *HWY_RESTRICT dst,
-                  ssize_t size,
-                  ssize_t min_size,
-                  ssize_t radius) {
+void reflect_copy(const T *HWY_RESTRICT src, T *HWY_RESTRICT dst, ssize_t size, ssize_t min_size, ssize_t radius) {
     HWY_ASSUME(size > 0);
     // HWY_ASSUME(min_size > 0);
     // HWY_ASSUME(min_size % 2 == 0);
