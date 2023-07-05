@@ -4,6 +4,8 @@
 #include <pybind11/pybind11.h>
 
 #include <stdexcept>
+#include <type_traits>
+#include <vector>
 
 namespace ff = fastfilters2;
 namespace py = pybind11;
@@ -17,6 +19,8 @@ using py::ssize_t;
 template <ssize_t MaxOrder, bool Eigenvalues = false, typename Func> auto filter(Func func) {
     return [func](py::array_t<ff::val_t, py::array::c_style | py::array::forcecast> src,
                   double scale) -> py::array_t<ff::val_t> {
+        static_assert(MaxOrder >= 0 && MaxOrder <= 2);
+
         auto shape = src.shape();
         auto ndim = src.ndim();
 
@@ -34,6 +38,11 @@ template <ssize_t MaxOrder, bool Eigenvalues = false, typename Func> auto filter
             }
         }
 
+        ssize_t ffshape[3] = {1, 1, 1};
+        for (ssize_t i = 0; i < ndim; ++i) {
+            ffshape[i] = shape[ndim - 1 - i];
+        }
+
         std::vector<ssize_t> pyshape;
         if constexpr (Eigenvalues) {
             pyshape.push_back(ndim);
@@ -42,8 +51,8 @@ template <ssize_t MaxOrder, bool Eigenvalues = false, typename Func> auto filter
             pyshape.push_back(shape[i]);
         }
 
-        py::array_t<ff::val_t> dst(pyshape);
-        func(src.data(), dst.mutable_data(), shape, ndim, scale);
+        py::array_t<ff::val_t> dst{pyshape};
+        func(src.data(), dst.mutable_data(), ffshape, ndim, scale);
         return dst;
     };
 }
@@ -60,7 +69,6 @@ PYBIND11_MODULE(_core, m) {
                 if (order < 0 || order > 2) {
                     throw std::invalid_argument("order must be 0, 1, or 2");
                 }
-
                 auto radius = ff::kernel_radius(scale, order);
                 py::array_t<ff::val_t> kernel{radius + 1};
                 ff::gaussian_kernel(kernel.mutable_data(), radius, scale, order);

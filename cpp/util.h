@@ -51,7 +51,7 @@ void reflect_copy(const T *HWY_RESTRICT src, T *HWY_RESTRICT dst, ssize_t size, 
     dst = std::reverse_copy(src + 1, src + 1 + radius, dst);
     dst = std::copy_n(src, size, dst);
     dst = std::reverse_copy(src + size - 1 - radius, src + size - 1, dst);
-    std::fill_n(dst, HWY_MAX(0, min_size - size), 0);
+    std::fill_n(dst, std::max(ssize_t{0}, min_size - size), 0);
 }
 } // namespace fastfilters2::util
 

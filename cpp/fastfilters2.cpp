@@ -5,8 +5,6 @@
 
 #include <algorithm>
 
-#include <iostream>
-
 // Comma-separated list of names.
 // Used for declare multiple variables and passing them to varidic functions.
 #ifndef ARGLIST
@@ -187,7 +185,7 @@ void add2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
     ssize_t step = hn::Lanes(d);
 
     for (ssize_t i = 0; i < size; i += step) {
-        i = HWY_MIN(i, size - step);
+        i = std::min(i, size - step);
 
         auto vec1 = hn::LoadU(d, src1 + i);
         auto vec2 = hn::LoadU(d, src2 + i);
@@ -202,7 +200,7 @@ void add3(ptr src1, ptr src2, ptr src3, mut_ptr dst, ssize_t size) {
     ssize_t step = hn::Lanes(d);
 
     for (ssize_t i = 0; i < size; i += step) {
-        i = HWY_MIN(i, size - step);
+        i = std::min(i, size - step);
 
         auto vec1 = hn::LoadU(d, src1 + i);
         auto vec2 = hn::LoadU(d, src2 + i);
@@ -218,7 +216,7 @@ void mul2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
     ssize_t step = hn::Lanes(d);
 
     for (ssize_t i = 0; i < size; i += step) {
-        i = HWY_MIN(i, size - step);
+        i = std::min(i, size - step);
 
         auto vec1 = hn::LoadU(d, src1 + i);
         auto vec2 = hn::LoadU(d, src2 + i);
@@ -233,7 +231,7 @@ void l2norm2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
     ssize_t step = hn::Lanes(d);
 
     for (ssize_t i = 0; i < size; i += step) {
-        i = HWY_MIN(i, size - step);
+        i = std::min(i, size - step);
 
         auto vec1 = hn::LoadU(d, src1 + i);
         auto vec2 = hn::LoadU(d, src2 + i);
@@ -251,7 +249,7 @@ void l2norm3(ptr src1, ptr src2, ptr src3, mut_ptr dst, ssize_t size) {
     ssize_t step = hn::Lanes(d);
 
     for (ssize_t i = 0; i < size; i += step) {
-        i = HWY_MIN(i, size - step);
+        i = std::min(i, size - step);
 
         auto vec1 = hn::LoadU(d, src1 + i);
         auto vec2 = hn::LoadU(d, src2 + i);
@@ -274,7 +272,7 @@ void eigenvalues2(ptr src00, ptr src01, ptr src11, mut_ptr dst, ssize_t size) {
     mut_ptr dst1 = dst + size;
 
     for (ssize_t i = 0; i < size; i += step) {
-        i = HWY_MIN(i, size - step);
+        i = std::min(i, size - step);
 
         auto vec00 = hn::LoadU(d, src00 + i);
         auto vec01 = hn::LoadU(d, src01 + i);
@@ -324,7 +322,7 @@ void eigenvalues3(ptr src00, ptr src01, ptr src02, ptr src11, ptr src12, ptr src
     auto zero = hn::Zero(d);
 
     for (ssize_t i = 0; i < size; i += step) {
-        i = HWY_MIN(i, size - step);
+        i = std::min(i, size - step);
 
         // clang-format off
 
@@ -415,37 +413,35 @@ void eigenvalues3(ptr src00, ptr src01, ptr src02, ptr src11, ptr src12, ptr src
 }
 
 template <ssize_t Order>
-void conv_x(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, ptr kernel, ssize_t radius, mut_ptr buf) {
-
+void conv_x(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, mut_ptr buf) {
     ssize_t step = batch_size();
-    auto outer_size = ndim == 2 ? shape[0] : shape[0] * shape[1];
-    auto contig_size = HWY_MAX(step, shape[ndim - 1]);
+    auto contig_size = std::max(step, shape[0]);
+    auto outer_size = shape[1] * shape[2];
 
-    for (ssize_t i = 0; i < outer_size; ++i, src += shape[ndim - 1], dst += contig_size) {
-        util::reflect_copy(src, buf, shape[ndim - 1], step, radius);
+    for (ssize_t i = 0; i < outer_size; ++i, src += shape[0], dst += contig_size) {
+        util::reflect_copy(src, buf, shape[0], step, radius);
         for (ssize_t x = 0; x < contig_size; x += step) {
-            x = HWY_MIN(x, contig_size - step);
+            x = std::min(x, contig_size - step);
             conv_batch<Order, true>(buf + radius + x, dst + x, kernel, radius, 0, 0, 0);
         }
     }
 }
 
 template <ssize_t Order>
-void conv_y(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, ptr kernel, ssize_t radius, mut_ptr buf) {
-
+void conv_y(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, mut_ptr buf) {
     // Buffer is not needed for strided convolution, but accept it as a parameter anyway
     // in order to keep the function signature identical to conv_contig.
     static_cast<void>(buf);
 
     ssize_t step = batch_size();
-    auto outer_size = ndim == 2 ? 1 : shape[0];
-    auto inner_size = shape[ndim - 2];
-    auto contig_size = HWY_MAX(step, shape[ndim - 1]);
+    auto contig_size = std::max(step, shape[0]);
+    auto inner_size = shape[1];
+    auto outer_size = shape[2];
     auto outer_step = inner_size * contig_size;
 
     for (ssize_t i = 0; i < outer_size; ++i, src += outer_step, dst += outer_step) {
         for (ssize_t x = 0; x < contig_size; x += step) {
-            x = HWY_MIN(x, contig_size - step);
+            x = std::min(x, contig_size - step);
             auto p = src + x;
             auto q = dst + x;
             for (ssize_t y = 0; y < inner_size; ++y, p += contig_size, q += contig_size) {
@@ -456,25 +452,20 @@ void conv_y(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, ptr kernel, ssi
 }
 
 template <ssize_t Order>
-void conv_z(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, ptr kernel, ssize_t radius, mut_ptr buf) {
-
+void conv_z(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, mut_ptr buf) {
     // Buffer is not needed for strided convolution, but accept it as a parameter anyway
     // in order to keep the function signature identical to conv_contig.
     static_cast<void>(buf);
 
-    // ndim is also not used because ndim <= 3, and this function colvolves along the Z axis.
-    static_cast<void>(ndim);
-
     ssize_t step = batch_size();
+    auto contig_size = std::max(step, shape[0]);
     auto outer_size = shape[1];
-    auto inner_size = shape[0];
-    auto contig_size = HWY_MAX(step, shape[2]);
-    auto outer_step = contig_size;
+    auto inner_size = shape[2];
     auto inner_step = contig_size * outer_size;
 
-    for (ssize_t i = 0; i < outer_size; ++i, src += outer_step, dst += outer_step) {
+    for (ssize_t i = 0; i < outer_size; ++i, src += contig_size, dst += contig_size) {
         for (ssize_t x = 0; x < contig_size; x += step) {
-            x = HWY_MIN(x, contig_size - step);
+            x = std::min(x, contig_size - step);
             auto p = src + x;
             auto q = dst + x;
             for (ssize_t z = 0; z < inner_size; ++z, p += inner_step, q += inner_step) {
@@ -501,15 +492,14 @@ struct context {
             : src_{src}, dst_{dst}, shape{shape}, ndim{ndim}, size{1}, temp_size{1}, cache(N + 1) {
 
         auto step = batch_size();
-        auto contig_size = shape[ndim - 1];
-        auto min_size = HWY_MAX(contig_size, step);
+        auto min_size = std::max(step, shape[0]);
 
-        for (ssize_t i = 0; i < ndim - 1; ++i) {
+        size = shape[0];
+        temp_size = min_size;
+        for (ssize_t i = 1; i < ndim; ++i) {
             size *= shape[i];
             temp_size *= shape[i];
         }
-        size *= contig_size;
-        temp_size *= min_size;
 
         for (ssize_t i = 0; i < N; ++i) {
             radius[i] = fastfilters2::kernel_radius(scale, i);
@@ -517,7 +507,7 @@ struct context {
             gaussian_kernel(cache[i].get(), radius[i], scale, i);
         }
         cache[N] = hwy::AllocateAligned<val_t>(min_size + 2 * radius[N - 1]);
-        tmp_dst = contig_size < min_size ? allocate() : dst_;
+        tmp_dst = shape[0] < min_size ? allocate() : dst_;
     }
 
     ~context() {
@@ -527,7 +517,7 @@ struct context {
         auto min_size = batch_size();
         auto q = dst_;
         for (mut_ptr p = tmp_dst; p != tmp_dst + temp_size; p += min_size) {
-            q = std::copy_n(p, shape[ndim - 1], q);
+            q = std::copy_n(p, shape[0], q);
         }
     }
 
@@ -539,17 +529,20 @@ struct context {
         return cache.back().get();
     }
 
-    template <ssize_t Order> void conv(ssize_t dim, ptr src, mut_ptr dst) {
+    template <ssize_t Dim, ssize_t Order> void conv(ptr src, mut_ptr dst) {
+        static_assert(0 <= Dim && Dim < N);
         static_assert(0 <= Order && Order < N);
+
         auto kernel = this->cache[Order].get();
         auto radius = this->radius[Order];
         auto buf = this->cache[N].get();
-        if (dim == ndim - 1) {
-            conv_x<Order>(src, dst, shape, ndim, kernel, radius, buf);
-        } else if (dim == ndim - 2) {
-            conv_y<Order>(src, dst, shape, ndim, kernel, radius, buf);
-        } else {
-            conv_z<Order>(src, dst, shape, ndim, kernel, radius, buf);
+
+        if constexpr (Dim == 0) {
+            conv_x<Order>(src, dst, shape, kernel, radius, buf);
+        } else if constexpr (Dim == 1) {
+            conv_y<Order>(src, dst, shape, kernel, radius, buf);
+        } else if constexpr (Dim == 2) {
+            conv_z<Order>(src, dst, shape, kernel, radius, buf);
         }
     }
 };
@@ -560,16 +553,16 @@ void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, dou
     if (ndim == 2) {
         mut_ptr tmp = ctx.allocate();
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<0>(ndim - 2, tmp, ctx.dst());
+        ctx.conv<0, 0>(ctx.src(), tmp);
+        ctx.conv<1, 0>(tmp, ctx.dst());
 
     } else {
         mut_ptr tmp1 = ctx.allocate();
         mut_ptr tmp2 = ctx.allocate();
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, ctx.dst());
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, ctx.dst());
     }
 }
 
@@ -581,11 +574,11 @@ void gaussian_gradient_magnitude(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t 
         mut_ptr x1y0 = ctx.allocate();
         mut_ptr x0y1 = ctx.allocate();
 
-        ctx.conv<1>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<0>(ndim - 2, tmp, x1y0);
+        ctx.conv<0, 1>(ctx.src(), tmp);
+        ctx.conv<1, 0>(tmp, x1y0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<1>(ndim - 2, tmp, x0y1);
+        ctx.conv<0, 0>(ctx.src(), tmp);
+        ctx.conv<1, 1>(tmp, x0y1);
 
         l2norm2(x1y0, x0y1, ctx.dst(), ctx.temp_size);
 
@@ -596,17 +589,17 @@ void gaussian_gradient_magnitude(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t 
         mut_ptr x0y1z0 = ctx.allocate();
         mut_ptr x0y0z1 = ctx.allocate();
 
-        ctx.conv<1>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, x1y0z0);
+        ctx.conv<0, 1>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, x1y0z0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<1>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, x0y1z0);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 1>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, x0y1z0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<1>(ndim - 3, tmp2, x0y0z1);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 1>(tmp2, x0y0z1);
 
         l2norm3(x1y0z0, x0y1z0, x0y0z1, ctx.dst(), ctx.temp_size);
     }
@@ -620,11 +613,11 @@ void laplacian_of_gaussian(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, 
         mut_ptr x2y0 = ctx.allocate();
         mut_ptr x0y2 = ctx.allocate();
 
-        ctx.conv<2>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<0>(ndim - 2, tmp, x2y0);
+        ctx.conv<0, 2>(ctx.src(), tmp);
+        ctx.conv<1, 0>(tmp, x2y0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<2>(ndim - 2, tmp, x0y2);
+        ctx.conv<0, 0>(ctx.src(), tmp);
+        ctx.conv<1, 2>(tmp, x0y2);
 
         add2(x2y0, x0y2, ctx.dst(), ctx.temp_size);
 
@@ -635,17 +628,17 @@ void laplacian_of_gaussian(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, 
         mut_ptr x0y2z0 = ctx.allocate();
         mut_ptr x0y0z2 = ctx.allocate();
 
-        ctx.conv<2>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, x2y0z0);
+        ctx.conv<0, 2>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, x2y0z0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<2>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, x0y2z0);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 2>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, x0y2z0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<2>(ndim - 3, tmp2, x0y0z2);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 2>(tmp2, x0y0z2);
 
         add3(x2y0z0, x0y2z0, x0y0z2, ctx.dst(), ctx.temp_size);
     }
@@ -660,14 +653,14 @@ void hessian_of_gaussian_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssiz
         mut_ptr xy = ctx.allocate();
         mut_ptr yy = ctx.allocate();
 
-        ctx.conv<2>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<0>(ndim - 2, tmp, xx);
+        ctx.conv<0, 2>(ctx.src(), tmp);
+        ctx.conv<1, 0>(tmp, xx);
 
-        ctx.conv<1>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<1>(ndim - 2, tmp, xy);
+        ctx.conv<0, 1>(ctx.src(), tmp);
+        ctx.conv<1, 1>(tmp, xy);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<2>(ndim - 2, tmp, yy);
+        ctx.conv<0, 0>(ctx.src(), tmp);
+        ctx.conv<1, 2>(tmp, yy);
 
         eigenvalues2(xx, xy, yy, ctx.dst(), ctx.temp_size);
 
@@ -681,29 +674,29 @@ void hessian_of_gaussian_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssiz
         mut_ptr yz = ctx.allocate();
         mut_ptr zz = ctx.allocate();
 
-        ctx.conv<2>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, xx);
+        ctx.conv<0, 2>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, xx);
 
-        ctx.conv<1>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<1>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, xy);
+        ctx.conv<0, 1>(ctx.src(), tmp1);
+        ctx.conv<1, 1>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, xy);
 
-        ctx.conv<1>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<1>(ndim - 3, tmp2, xz);
+        ctx.conv<0, 1>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 1>(tmp2, xz);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<2>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, yy);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 2>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, yy);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<1>(ndim - 2, tmp1, tmp2);
-        ctx.conv<1>(ndim - 3, tmp2, yz);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 1>(tmp1, tmp2);
+        ctx.conv<2, 1>(tmp2, yz);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<2>(ndim - 3, tmp2, zz);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 2>(tmp2, zz);
 
         // eigenvalues3(xx, xy, xz, yy, yz, zz, ctx.dst(), ctx.temp_size);
 
@@ -723,11 +716,11 @@ void structure_tensor_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t
         mut_ptr xy = ctx.allocate();
         mut_ptr yy = ctx.allocate();
 
-        ctx.conv<1>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<0>(ndim - 2, tmp, x1y0);
+        ctx.conv<0, 1>(ctx.src(), tmp);
+        ctx.conv<1, 0>(tmp, x1y0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp);
-        ctx.conv<1>(ndim - 2, tmp, x0y1);
+        ctx.conv<0, 0>(ctx.src(), tmp);
+        ctx.conv<1, 1>(tmp, x0y1);
 
         mul2(x1y0, x1y0, tmp, ctx.temp_size);
         gaussian_smoothing(tmp, xx, shape, ndim, scale);
@@ -753,17 +746,17 @@ void structure_tensor_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t
         mut_ptr yz = ctx.allocate();
         mut_ptr zz = ctx.allocate();
 
-        ctx.conv<1>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, x1y0z0);
+        ctx.conv<0, 1>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, x1y0z0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<1>(ndim - 2, tmp1, tmp2);
-        ctx.conv<0>(ndim - 3, tmp2, x0y1z0);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 1>(tmp1, tmp2);
+        ctx.conv<2, 0>(tmp2, x0y1z0);
 
-        ctx.conv<0>(ndim - 1, ctx.src(), tmp1);
-        ctx.conv<0>(ndim - 2, tmp1, tmp2);
-        ctx.conv<1>(ndim - 3, tmp2, x0y0z1);
+        ctx.conv<0, 0>(ctx.src(), tmp1);
+        ctx.conv<1, 0>(tmp1, tmp2);
+        ctx.conv<2, 1>(tmp2, x0y0z1);
 
         mul2(x1y0z0, x1y0z0, tmp1, ctx.temp_size);
         gaussian_smoothing(tmp1, xx, shape, ndim, scale);
