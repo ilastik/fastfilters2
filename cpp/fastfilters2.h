@@ -22,9 +22,7 @@ using ssize_ptr = const ssize_t *HWY_RESTRICT;
  * Total (virtual) size of a kernel: 2 * radius + 1.
  * The actual number of elements to be allocated: radius + 1 (central element and the right half).
  */
-inline ssize_t kernel_radius(double scale, ssize_t order) {
-    return std::ceil((3 + 0.5 * order) * scale);
-}
+inline ssize_t kernel_radius(double scale, ssize_t order) { return std::ceil((3 + 0.5 * order) * scale); }
 
 void gaussian_kernel(mut_ptr kernel, ssize_t size, double scale, ssize_t order);
 

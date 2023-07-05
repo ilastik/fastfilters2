@@ -180,87 +180,25 @@ void conv_batch(ptr src, mut_ptr dst, ptr kernel, ssize_t radius, ssize_t stride
     util::static_for<Unroll>([&](auto idx, const auto &vec) { hn::StoreU(vec, d, dst + idx * lanes); }, ARGLIST);
 }
 
-void add2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
+/**
+ * Load lanes from args, apply func to them, and store the result into dst.
+ * Tails are handled automatically.
+ * N is the unroll factor.
+ */
+template <ssize_t N = 1, typename Func, typename... Args>
+void lanewise(mut_ptr dst, ssize_t size, Func func, Args &&...args) {
+    static_assert(N >= 1);
+
     D d;
-    ssize_t step = hn::Lanes(d);
+    ssize_t lanes = hn::Lanes(d);
+    ssize_t step = N * lanes;
 
     for (ssize_t i = 0; i < size; i += step) {
         i = std::min(i, size - step);
 
-        auto vec1 = hn::LoadU(d, src1 + i);
-        auto vec2 = hn::LoadU(d, src2 + i);
-
-        auto out = hn::Add(vec1, vec2);
-        hn::StoreU(out, d, dst + i);
-    }
-}
-
-void add3(ptr src1, ptr src2, ptr src3, mut_ptr dst, ssize_t size) {
-    D d;
-    ssize_t step = hn::Lanes(d);
-
-    for (ssize_t i = 0; i < size; i += step) {
-        i = std::min(i, size - step);
-
-        auto vec1 = hn::LoadU(d, src1 + i);
-        auto vec2 = hn::LoadU(d, src2 + i);
-        auto vec3 = hn::LoadU(d, src3 + i);
-
-        auto out = hn::Add(hn::Add(vec1, vec2), vec3);
-        hn::StoreU(out, d, dst + i);
-    }
-}
-
-void mul2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
-    D d;
-    ssize_t step = hn::Lanes(d);
-
-    for (ssize_t i = 0; i < size; i += step) {
-        i = std::min(i, size - step);
-
-        auto vec1 = hn::LoadU(d, src1 + i);
-        auto vec2 = hn::LoadU(d, src2 + i);
-
-        auto out = hn::Mul(vec1, vec2);
-        hn::StoreU(out, d, dst + i);
-    }
-}
-
-void l2norm2(ptr src1, ptr src2, mut_ptr dst, ssize_t size) {
-    D d;
-    ssize_t step = hn::Lanes(d);
-
-    for (ssize_t i = 0; i < size; i += step) {
-        i = std::min(i, size - step);
-
-        auto vec1 = hn::LoadU(d, src1 + i);
-        auto vec2 = hn::LoadU(d, src2 + i);
-
-        vec1 = hn::Mul(vec1, vec1);
-        vec2 = hn::Mul(vec2, vec2);
-
-        auto out = hn::Sqrt(hn::Add(vec1, vec2));
-        hn::StoreU(out, d, dst + i);
-    }
-}
-
-void l2norm3(ptr src1, ptr src2, ptr src3, mut_ptr dst, ssize_t size) {
-    D d;
-    ssize_t step = hn::Lanes(d);
-
-    for (ssize_t i = 0; i < size; i += step) {
-        i = std::min(i, size - step);
-
-        auto vec1 = hn::LoadU(d, src1 + i);
-        auto vec2 = hn::LoadU(d, src2 + i);
-        auto vec3 = hn::LoadU(d, src3 + i);
-
-        vec1 = hn::Mul(vec1, vec1);
-        vec2 = hn::Mul(vec2, vec2);
-        vec3 = hn::Mul(vec3, vec3);
-
-        auto out = hn::Sqrt(hn::Add(hn::Add(vec1, vec2), vec3));
-        hn::StoreU(out, d, dst + i);
+        for (ssize_t n = 0; n < step; n += lanes) {
+            hn::StoreU(func(hn::LoadU(d, std::forward<Args>(args) + i + n)...), d, dst + i + n);
+        }
     }
 }
 
@@ -412,8 +350,7 @@ void eigenvalues3(ptr src00, ptr src01, ptr src02, ptr src11, ptr src12, ptr src
     }
 }
 
-template <ssize_t Order>
-void conv_x(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, mut_ptr buf) {
+template <ssize_t Order> void conv_x(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, mut_ptr buf) {
     ssize_t step = batch_size();
     auto contig_size = std::max(step, shape[0]);
     auto outer_size = shape[1] * shape[2];
@@ -427,12 +364,7 @@ void conv_x(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, m
     }
 }
 
-template <ssize_t Order>
-void conv_y(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, mut_ptr buf) {
-    // Buffer is not needed for strided convolution, but accept it as a parameter anyway
-    // in order to keep the function signature identical to conv_contig.
-    static_cast<void>(buf);
-
+template <ssize_t Order> void conv_y(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius) {
     ssize_t step = batch_size();
     auto contig_size = std::max(step, shape[0]);
     auto inner_size = shape[1];
@@ -451,12 +383,7 @@ void conv_y(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, m
     }
 }
 
-template <ssize_t Order>
-void conv_z(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius, mut_ptr buf) {
-    // Buffer is not needed for strided convolution, but accept it as a parameter anyway
-    // in order to keep the function signature identical to conv_contig.
-    static_cast<void>(buf);
-
+template <ssize_t Order> void conv_z(ptr src, mut_ptr dst, ssize_ptr shape, ptr kernel, ssize_t radius) {
     ssize_t step = batch_size();
     auto contig_size = std::max(step, shape[0]);
     auto outer_size = shape[1];
@@ -533,16 +460,12 @@ struct context {
         static_assert(0 <= Dim && Dim < N);
         static_assert(0 <= Order && Order < N);
 
-        auto kernel = this->cache[Order].get();
-        auto radius = this->radius[Order];
-        auto buf = this->cache[N].get();
-
         if constexpr (Dim == 0) {
-            conv_x<Order>(src, dst, shape, kernel, radius, buf);
+            conv_x<Order>(src, dst, shape, cache[Order].get(), radius[Order], cache[N].get());
         } else if constexpr (Dim == 1) {
-            conv_y<Order>(src, dst, shape, kernel, radius, buf);
+            conv_y<Order>(src, dst, shape, cache[Order].get(), radius[Order]);
         } else if constexpr (Dim == 2) {
-            conv_z<Order>(src, dst, shape, kernel, radius, buf);
+            conv_z<Order>(src, dst, shape, cache[Order].get(), radius[Order]);
         }
     }
 };
@@ -580,7 +503,8 @@ void gaussian_gradient_magnitude(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t 
         ctx.conv<0, 0>(ctx.src(), tmp);
         ctx.conv<1, 1>(tmp, x0y1);
 
-        l2norm2(x1y0, x0y1, ctx.dst(), ctx.temp_size);
+        auto l2norm = [](auto v1, auto v2) { return hn::Sqrt(hn::Add(hn::Mul(v1, v1), hn::Mul(v2, v2))); };
+        lanewise(ctx.dst(), ctx.temp_size, l2norm, x1y0, x0y1);
 
     } else {
         mut_ptr tmp1 = ctx.allocate();
@@ -601,7 +525,10 @@ void gaussian_gradient_magnitude(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t 
         ctx.conv<1, 0>(tmp1, tmp2);
         ctx.conv<2, 1>(tmp2, x0y0z1);
 
-        l2norm3(x1y0z0, x0y1z0, x0y0z1, ctx.dst(), ctx.temp_size);
+        auto l2norm = [](auto v1, auto v2, auto v3) {
+            return hn::Sqrt(hn::Add(hn::Add(hn::Mul(v1, v1), hn::Mul(v2, v2)), hn::Mul(v3, v3)));
+        };
+        lanewise(ctx.dst(), ctx.temp_size, l2norm, x1y0z0, x0y1z0, x0y0z1);
     }
 }
 
@@ -619,7 +546,8 @@ void laplacian_of_gaussian(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, 
         ctx.conv<0, 0>(ctx.src(), tmp);
         ctx.conv<1, 2>(tmp, x0y2);
 
-        add2(x2y0, x0y2, ctx.dst(), ctx.temp_size);
+        auto add = hn::Add<hn::VFromD<D>>;
+        lanewise(dst, ctx.temp_size, add, x2y0, x0y2);
 
     } else {
         mut_ptr tmp1 = ctx.allocate();
@@ -640,7 +568,8 @@ void laplacian_of_gaussian(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, 
         ctx.conv<1, 0>(tmp1, tmp2);
         ctx.conv<2, 2>(tmp2, x0y0z2);
 
-        add3(x2y0z0, x0y2z0, x0y0z2, ctx.dst(), ctx.temp_size);
+        auto add = [](auto v1, auto v2, auto v3) { return hn::Add(hn::Add(v1, v2), v3); };
+        lanewise(dst, ctx.temp_size, add, x2y0z0, x0y2z0, x0y0z2);
     }
 }
 
@@ -708,6 +637,10 @@ void hessian_of_gaussian_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssiz
 void structure_tensor_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale) {
     context ctx{src, dst, shape, ndim, scale / 2};
 
+    auto mul = [size = ctx.temp_size](ptr src1, ptr src2, mut_ptr dst) {
+        lanewise(dst, size, hn::Mul<hn::VFromD<D>>, src1, src2);
+    };
+
     if (ndim == 2) {
         mut_ptr tmp = ctx.allocate();
         mut_ptr x1y0 = ctx.allocate();
@@ -722,13 +655,13 @@ void structure_tensor_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t
         ctx.conv<0, 0>(ctx.src(), tmp);
         ctx.conv<1, 1>(tmp, x0y1);
 
-        mul2(x1y0, x1y0, tmp, ctx.temp_size);
+        mul(x1y0, x1y0, tmp);
         gaussian_smoothing(tmp, xx, shape, ndim, scale);
 
-        mul2(x1y0, x0y1, tmp, ctx.temp_size);
+        mul(x1y0, x0y1, tmp);
         gaussian_smoothing(tmp, xy, shape, ndim, scale);
 
-        mul2(x0y1, x0y1, tmp, ctx.temp_size);
+        mul(x0y1, x0y1, tmp);
         gaussian_smoothing(tmp, yy, shape, ndim, scale);
 
         eigenvalues2(xx, xy, yy, ctx.dst(), ctx.temp_size);
@@ -758,22 +691,22 @@ void structure_tensor_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t
         ctx.conv<1, 0>(tmp1, tmp2);
         ctx.conv<2, 1>(tmp2, x0y0z1);
 
-        mul2(x1y0z0, x1y0z0, tmp1, ctx.temp_size);
+        mul(x1y0z0, x1y0z0, tmp1);
         gaussian_smoothing(tmp1, xx, shape, ndim, scale);
 
-        mul2(x1y0z0, x0y1z0, tmp1, ctx.temp_size);
+        mul(x1y0z0, x0y1z0, tmp1);
         gaussian_smoothing(tmp1, xy, shape, ndim, scale);
 
-        mul2(x1y0z0, x0y0z1, tmp1, ctx.temp_size);
+        mul(x1y0z0, x0y0z1, tmp1);
         gaussian_smoothing(tmp1, xz, shape, ndim, scale);
 
-        mul2(x0y1z0, x0y1z0, tmp1, ctx.temp_size);
+        mul(x0y1z0, x0y1z0, tmp1);
         gaussian_smoothing(tmp1, yy, shape, ndim, scale);
 
-        mul2(x0y1z0, x0y0z1, tmp1, ctx.temp_size);
+        mul(x0y1z0, x0y0z1, tmp1);
         gaussian_smoothing(tmp1, yz, shape, ndim, scale);
 
-        mul2(x0y0z1, x0y0z1, tmp1, ctx.temp_size);
+        mul(x0y0z1, x0y0z1, tmp1);
         gaussian_smoothing(tmp1, zz, shape, ndim, scale);
 
         // eigenvalues3(xx, xy, xz, yy, yz, zz, ctx.dst(), ctx.temp_size);
