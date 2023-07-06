@@ -23,6 +23,9 @@ add_subdirectory(deps/pybind11)
 add_library(fastfilters2 cpp/fastfilters2.cpp)
 target_link_libraries(fastfilters2 PUBLIC hwy)
 target_include_directories(fastfilters2 PRIVATE cpp)
+set_target_properties(fastfilters2 PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
 set_cxx_std(fastfilters2 17)
 enable_cxx_warnings(fastfilters2)
 
