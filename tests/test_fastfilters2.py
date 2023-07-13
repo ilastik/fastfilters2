@@ -1,6 +1,5 @@
 import itertools
 
-import fastfilters
 import numpy
 import pytest
 
@@ -88,24 +87,28 @@ class TestGaussianKernel:
 @parametrize_filters
 class TestFilters:
     def test_gaussian_smoothing(self, shape, scale):
+        fastfilters = pytest.importorskip("fastfilters")
         src = random_array(shape)
         actual = fastfilters2.gaussian_smoothing(src, scale)
         desired = fastfilters.gaussianSmoothing(src, scale)
         numpy.testing.assert_array_almost_equal_nulp(actual, desired, nulp=4)
 
     def test_gaussian_gradient_magnitude(self, shape, scale):
+        fastfilters = pytest.importorskip("fastfilters")
         src = random_array(shape)
         actual = fastfilters2.gaussian_gradient_magnitude(src, scale)
         desired = fastfilters.gaussianGradientMagnitude(src, scale)
         numpy.testing.assert_allclose(actual, desired, atol=2 * max_spacing(src))
 
     def test_laplacian_of_gaussian(self, shape, scale):
+        fastfilters = pytest.importorskip("fastfilters")
         src = random_array(shape)
         actual = fastfilters2.laplacian_of_gaussian(src, scale)
         desired = fastfilters.laplacianOfGaussian(src, scale)
         numpy.testing.assert_allclose(actual, desired, atol=5 * max_spacing(src))
 
     def test_hessian_of_gaussian_eigenvalues(self, shape, scale):
+        fastfilters = pytest.importorskip("fastfilters")
         if len(shape) == 3:
             pytest.skip("eigenvalues for 3D inputs diverge from fastfilters1")
         src = random_array(shape)
@@ -115,6 +118,7 @@ class TestFilters:
         numpy.testing.assert_allclose(actual, desired, atol=4 * max_spacing(src))
 
     def test_structure_tensor_eigenvalues(self, shape, scale):
+        fastfilters = pytest.importorskip("fastfilters")
         if len(shape) == 3:
             pytest.skip("eigenvalues for 3D inputs diverge from fastfilters1")
         src = random_array(shape)
@@ -173,6 +177,7 @@ def snake2camel(name: str) -> str:
 
 @parametrize_bench_filters
 def bench_filters_ff1(benchmark, name, shape, scale):
+    fastfilters = pytest.importorskip("fastfilters")
     args = [scale]
     if name == "structure_tensor_eigenvalues":
         args.append(0.5 * scale)
