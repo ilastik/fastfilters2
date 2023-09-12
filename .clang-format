@@ -1,13 +1,10 @@
----
-BasedOnStyle: LLVM
 Language: Cpp
-
+BasedOnStyle: LLVM
+IndentWidth: 4
 AccessModifierOffset: -4
+ContinuationIndentWidth: 8
+ConstructorInitializerIndentWidth: 8
+ColumnLimit: 88
 BinPackArguments: false
 BinPackParameters: false
-ColumnLimit: 120
-ConstructorInitializerIndentWidth: 8
-ContinuationIndentWidth: 8
-IndentWidth: 4
 PackConstructorInitializers: NextLine
-...

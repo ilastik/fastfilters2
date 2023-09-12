@@ -1,36 +1,33 @@
 #ifndef FASTFILTERS2_H_
 #define FASTFILTERS2_H_
 
-#include <hwy/base.h>
-
 #include <cmath>
 #include <cstddef>
-#include <type_traits>
 
 namespace fastfilters2 {
-using val_t = float;
-using ptr = const val_t *HWY_RESTRICT;
-using mut_ptr = val_t *HWY_RESTRICT;
+using std::size_t;
 
-// Same as decltype(0z) in C++23.
-using ssize_t = std::make_signed_t<std::size_t>;
-using ssize_ptr = const ssize_t *HWY_RESTRICT;
+void gaussian_kernel(float *kernel, size_t radius, double scale, size_t order);
 
-/**
- * Return radius of a Gaussian kernel for given scale (sigma) and order.
- * Order is the kernel derivative order (0, 1 or 2).
- * Total (virtual) size of a kernel: 2 * radius + 1.
- * The actual number of elements to be allocated: radius + 1 (central element and the right half).
- */
-inline ssize_t kernel_radius(double scale, ssize_t order) { return std::ceil((3 + 0.5 * order) * scale); }
+struct params {
+    float *dst;
+    const float *src;
+    size_t size[3];
+    size_t ndim;
+    double scale;
+    double window_ratio;
+};
 
-void gaussian_kernel(mut_ptr kernel, ssize_t size, double scale, ssize_t order);
+void gaussian_smoothing(params params);
+void gaussian_gradient_magnitude(params params);
+void laplacian_of_gaussian(params params);
+void hessian_of_gaussian_eigenvalues(params params);
+void structure_tensor_eigenvalues(params params, double st_scale);
 
-void gaussian_smoothing(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale);
-void gaussian_gradient_magnitude(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale);
-void laplacian_of_gaussian(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale);
-void hessian_of_gaussian_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale);
-void structure_tensor_eigenvalues(ptr src, mut_ptr dst, ssize_ptr shape, ssize_t ndim, double scale);
+inline size_t kernel_radius(double scale, size_t order, double window_ratio) {
+    return window_ratio > 0 ? std::round(window_ratio * scale)
+                            : std::ceil((3 + 0.5 * order) * scale);
+}
 } // namespace fastfilters2
 
 #endif
