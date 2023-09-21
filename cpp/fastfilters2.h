@@ -25,7 +25,7 @@ void hessian_of_gaussian_eigenvalues(params params);
 void structure_tensor_eigenvalues(params params, double st_scale);
 
 inline size_t kernel_radius(double scale, size_t order, double window_ratio) {
-    return window_ratio > 0 ? std::round(window_ratio * scale)
+    return window_ratio > 0 ? std::floor(window_ratio * scale + 0.5)
                             : std::ceil((3 + 0.5 * order) * scale);
 }
 } // namespace fastfilters2

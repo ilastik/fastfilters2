@@ -7,8 +7,6 @@
 #include <numeric>
 #include <vector>
 
-#include <iostream>
-
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "fastfilters2.cpp"
 #include <hwy/foreach_target.h>
@@ -273,9 +271,9 @@ void eigenvalues2(
     auto half = hn::Set(d, 0.5);
 
     for (size_t i = 0; i < size; i += hn::Lanes(d)) {
-        auto v00 = hn::Load(d, src00 + i);
-        auto v01 = hn::Load(d, src01 + i);
-        auto v11 = hn::Load(d, src11 + i);
+        auto v00 = hn::LoadU(d, src00 + i);
+        auto v01 = hn::LoadU(d, src01 + i);
+        auto v11 = hn::LoadU(d, src11 + i);
 
         auto tmp0 = hn::Mul(hn::Add(v00, v11), half);
         auto tmp1 = hn::Mul(hn::Sub(v00, v11), half);
@@ -283,8 +281,8 @@ void eigenvalues2(
 
         auto det = hn::Sqrt(hn::Add(tmp1, hn::Mul(v01, v01)));
 
-        hn::Store(hn::Add(tmp0, det), d, dst0 + i);
-        hn::Store(hn::Sub(tmp0, det), d, dst1 + i);
+        hn::StoreU(hn::Add(tmp0, det), d, dst0 + i);
+        hn::StoreU(hn::Sub(tmp0, det), d, dst1 + i);
     }
 }
 
@@ -310,12 +308,12 @@ void eigenvalues3(T *dst0,
     for (size_t i = 0; i < size; i += hn::Lanes(d)) {
         // clang-format off
 
-        auto v_a00 = hn::Load(d, src00 + i);
-        auto v_a01 = hn::Load(d, src01 + i);
-        auto v_a02 = hn::Load(d, src02 + i);
-        auto v_a11 = hn::Load(d, src11 + i);
-        auto v_a12 = hn::Load(d, src12 + i);
-        auto v_a22 = hn::Load(d, src22 + i);
+        auto v_a00 = hn::LoadU(d, src00 + i);
+        auto v_a01 = hn::LoadU(d, src01 + i);
+        auto v_a02 = hn::LoadU(d, src02 + i);
+        auto v_a11 = hn::LoadU(d, src11 + i);
+        auto v_a12 = hn::LoadU(d, src12 + i);
+        auto v_a22 = hn::LoadU(d, src22 + i);
 
         // guard against float overflows
         auto v_max0 = hn::Max(hn::Abs(v_a00), hn::Abs(v_a01));
@@ -378,9 +376,9 @@ void eigenvalues3(T *dst0,
         v_r1 = hn::Mul(v_r1, v_max_element);
         v_r2 = hn::Mul(v_r2, v_max_element);
 
-        hn::Store(v_r0, d, dst2 + i);
-        hn::Store(v_r1, d, dst1 + i);
-        hn::Store(v_r2, d, dst0 + i);
+        hn::StoreU(v_r0, d, dst2 + i);
+        hn::StoreU(v_r1, d, dst1 + i);
+        hn::StoreU(v_r2, d, dst0 + i);
 
         // clang-format on
     }
@@ -424,9 +422,9 @@ private:
         gaussian_kernel(kernels[order].get(), radii[order], scale, order);
     }
 
-    template <size_t count> std::array<T*, count> new_buffers() {
+    template <size_t count> std::array<T *, count> new_buffers() {
         tmp_buffer = hwy::AllocateAligned<T>(count * size_total);
-        std::array<T*, count> ptrs;
+        std::array<T *, count> ptrs;
         T *p = tmp_buffer.get();
         for (size_t i = 0; i < count; ++i, p += size_total) {
             ptrs[i] = p;
@@ -445,12 +443,12 @@ private:
         return dst;
     }
 
-   template <typename F> void vmap2(T *dst, const T *src1, const T *src2, F func) {
+    template <typename F> void vmap2(T *dst, const T *src1, const T *src2, F func) {
         D d;
         for (size_t i = 0; i < size_total; i += hn::Lanes(d)) {
-            auto v1 = hn::Load(d, src1 + i);
-            auto v2 = hn::Load(d, src2 + i);
-            hn::Store(func(v1, v2), d, dst + i);
+            auto v1 = hn::LoadU(d, src1 + i);
+            auto v2 = hn::LoadU(d, src2 + i);
+            hn::StoreU(func(v1, v2), d, dst + i);
         }
     }
 
@@ -458,10 +456,10 @@ private:
     void vmap3(T *dst, const T *src1, const T *src2, const T *src3, F func) {
         D d;
         for (size_t i = 0; i < size_total; i += hn::Lanes(d)) {
-            auto v1 = hn::Load(d, src1 + i);
-            auto v2 = hn::Load(d, src2 + i);
-            auto v3 = hn::Load(d, src3 + i);
-            hn::Store(func(v1, v2, v3), d, dst + i);
+            auto v1 = hn::LoadU(d, src1 + i);
+            auto v2 = hn::LoadU(d, src2 + i);
+            auto v3 = hn::LoadU(d, src3 + i);
+            hn::StoreU(func(v1, v2, v3), d, dst + i);
         }
     }
 
@@ -583,11 +581,11 @@ public:
             conv<1, 1>(y, conv<0, 0>(xx, src));
 
             for (size_t i = 0; i < size_total; i += hn::Lanes(d)) {
-                auto vx = hn::Load(d, x + i);
-                auto vy = hn::Load(d, y + i);
-                hn::Store(hn::Mul(vx, vx), d, xx + i);
-                hn::Store(hn::Mul(vx, vy), d, xy + i);
-                hn::Store(hn::Mul(vy, vy), d, yy + i);
+                auto vx = hn::LoadU(d, x + i);
+                auto vy = hn::LoadU(d, y + i);
+                hn::StoreU(hn::Mul(vx, vx), d, xx + i);
+                hn::StoreU(hn::Mul(vx, vy), d, xy + i);
+                hn::StoreU(hn::Mul(vy, vy), d, yy + i);
             }
 
             scale = smooth_scale;
@@ -607,15 +605,15 @@ public:
             conv<2, 1>(z, conv<1, 0>(yy, xx));
 
             for (size_t i = 0; i < size_total; i += hn::Lanes(d)) {
-                auto vx = hn::Load(d, x + i);
-                auto vy = hn::Load(d, y + i);
-                auto vz = hn::Load(d, z + i);
-                hn::Store(hn::Mul(vx, vx), d, xx + i);
-                hn::Store(hn::Mul(vx, vy), d, xy + i);
-                hn::Store(hn::Mul(vx, vz), d, xz + i);
-                hn::Store(hn::Mul(vy, vy), d, yy + i);
-                hn::Store(hn::Mul(vy, vz), d, yz + i);
-                hn::Store(hn::Mul(vz, vz), d, zz + i);
+                auto vx = hn::LoadU(d, x + i);
+                auto vy = hn::LoadU(d, y + i);
+                auto vz = hn::LoadU(d, z + i);
+                hn::StoreU(hn::Mul(vx, vx), d, xx + i);
+                hn::StoreU(hn::Mul(vx, vy), d, xy + i);
+                hn::StoreU(hn::Mul(vx, vz), d, xz + i);
+                hn::StoreU(hn::Mul(vy, vy), d, yy + i);
+                hn::StoreU(hn::Mul(vy, vz), d, yz + i);
+                hn::StoreU(hn::Mul(vz, vz), d, zz + i);
             }
 
             scale = smooth_scale;

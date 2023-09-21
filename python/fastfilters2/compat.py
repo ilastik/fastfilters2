@@ -1,7 +1,5 @@
 import functools
 
-import numpy
-
 from ._core import (
     gaussian_gradient_magnitude,
     gaussian_smoothing,
@@ -50,8 +48,7 @@ def gaussianGradientMagnitude(array, sigma, window_size=0.0):
 
 @_wrap
 def hessianOfGaussianEigenvalues(image, scale, window_size=0.0):
-    res = hessian_of_gaussian_eigenvalues(image, scale, window_ratio=window_size)
-    return numpy.moveaxis(res, 0, -1)
+    return hessian_of_gaussian_eigenvalues(image, scale, window_ratio=window_size)
 
 
 @_wrap
@@ -61,7 +58,6 @@ def laplacianOfGaussian(array, scale=1.0, window_size=0.0):
 
 @_wrap
 def structureTensorEigenvalues(image, innerScale, outerScale, window_size=0.0):
-    res = structure_tensor_eigenvalues(
+    return structure_tensor_eigenvalues(
         image, innerScale, st_scale=outerScale, window_ratio=window_size
     )
-    return numpy.moveaxis(res, 0, -1)

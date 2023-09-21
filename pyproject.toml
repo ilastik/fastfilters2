@@ -45,7 +45,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "numpy>=1.22",
+    "numpy>=1.21",
 ]
 
 [project.urls]
