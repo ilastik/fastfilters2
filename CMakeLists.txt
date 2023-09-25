@@ -1,46 +1,35 @@
-cmake_minimum_required(VERSION 3.19...3.25)
+cmake_minimum_required(VERSION 3.20)
 project(fastfilters2 LANGUAGES CXX)
 
-set(CMAKE_BUILD_TYPE Release)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+function(set_cxx_standard target standard)
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD ${standard}
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF)
+endfunction()
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+function(enable_cxx_warnings target)
+    target_compile_options(${target} PRIVATE
+        $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wall -Wextra>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+endfunction()
 
-option(FASTFILTERS2_BENCHMARK "Build benchmarks")
-
-set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "")
-set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "")
-set(BUILD_TESTING OFF CACHE BOOL "")
-set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "")
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "")
-set(HWY_ENABLE_INSTALL OFF CACHE BOOL "")
+set(HWY_ENABLE_TESTS OFF CACHE BOOL "")
 
-if(${FASTFILTERS2_BENCHMARK})
-    add_subdirectory(deps/benchmark)
-endif()
-add_subdirectory(deps/highway)
 add_subdirectory(deps/pybind11)
+add_subdirectory(deps/highway)
 
 add_library(fastfilters2 cpp/fastfilters2.cpp)
 target_link_libraries(fastfilters2 PRIVATE hwy)
-target_include_directories(fastfilters2 PUBLIC cpp)
+target_include_directories(fastfilters2 PRIVATE cpp)
+set_target_properties(fastfilters2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_cxx_standard(fastfilters2 17)
+enable_cxx_warnings(fastfilters2)
 
-pybind11_add_module(_core cpp/_core.cpp)
+pybind11_add_module(_core cpp/module.cpp)
 target_link_libraries(_core PRIVATE fastfilters2)
-install(TARGETS _core DESTINATION fastfilters2)
-
-if(FASTFILTERS2_BENCHMARK)
-    add_executable(bm cpp/benchmark.cpp)
-    target_link_libraries(bm PRIVATE fastfilters2 benchmark::benchmark)
-    add_custom_target(
-        runbm
-        "$<TARGET_FILE:bm>"
-        DEPENDS bm
-        WORKING_DIRECTORY ${bm_BINARY_DIR}
-        VERBATIM
-        USES_TERMINAL
-        COMMAND_EXPAND_LISTS
-    )
-endif()
+set_target_properties(_core PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/python/fastfilters2)
+set_cxx_standard(_core 17)
+enable_cxx_warnings(_core)

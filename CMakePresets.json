@@ -1,26 +1,20 @@
 {
-    "version": 3,
+    "version": 2,
     "configurePresets": [
         {
-            "name": "dev",
+            "name": "main",
             "generator": "Ninja",
-            "binaryDir": "build",
-            "installDir": "src",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
-                "FASTFILTERS2_BENCHMARK": "ON"
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
             }
         }
     ],
     "buildPresets": [
         {
-            "name": "dev.bm",
-            "configurePreset": "dev",
-            "targets": ["runbm"]
-        },
-        {
-            "name": "dev.install",
-            "configurePreset": "dev",
-            "targets": ["install"]
+            "name": "main",
+            "configurePreset": "main"
         }
     ]
 }
