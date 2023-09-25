@@ -82,8 +82,10 @@ auto wrap_filter(F func) {
                   double window_ratio) {
         auto [params, out] =
                 get_params<max_order, eigenvalues>(data, scale, window_ratio);
-        py::gil_scoped_release release;
-        func(params);
+        {
+            py::gil_scoped_release release;
+            func(params);
+        }
         return out;
     };
 }
@@ -153,8 +155,10 @@ PYBIND11_MODULE(_core, m) {
                 validate_shape(data.shape(),
                                data.ndim(),
                                get_radius(st_scale, 1, window_ratio));
-                py::gil_scoped_release release;
-                ff::structure_tensor_eigenvalues(params, st_scale);
+                {
+                    py::gil_scoped_release release;
+                    ff::structure_tensor_eigenvalues(params, st_scale);
+                }
                 return out;
             },
             "Compute eigenvalues of structure tensor.",
