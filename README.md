@@ -4,37 +4,32 @@
 
 ## Local development
 
-The following commands use [Mambaforge][mambaforge] for installing build dependencies.
-You should also have a working, modern C++ compiler toolchain installed in your system.
+The following commands use [micromamba][mamba], but `conda` is also possible. You should
+also have a [C++17][c++17] compiler toolchain installed in your system.
 
-```sh
-# Create and activate a local development environment.
-mamba create --name ff2dev --yes python pip cmake ninja numpy
-conda activate ff2dev
+1. Create a new development environment:
 
-# Install this package in editable mode:
-# all changes in Python source code are picked up automatically.
-pip install --editable .
+    ```sh
+    micromamba create -y -n fastfilters2 -c conda-forge -c ilastik-forge python=3.9 fastfilters
+    ```
 
-# Configure CMake build.
-cmake --preset dev
+2. Activate the created environment (remember to activate it every time in a new shell):
 
-# Build and run benchmarks: this needs to be run when C++ source files change.
-cmake --build --preset dev.bm
+    ```sh
+    micromamba activate fastfilters2
+    ```
 
-# Build and install Python module: this needs to be run when C++ source files change.
-cmake --build --preset dev.install
-```
+3. Install development dependencies:
 
-## Guides
+    ```sh
+    pip install scikit-build-core[pyproject] nanobind pytest imageio clang-format ruff typer rich
+    ```
 
-### Add a new submodule dependency
+4. Install the package in editable mode:
 
-```sh
-git submodule add --name REPO https://github.com/OWNER/REPO.git deps/REPO
-git -C deps/REPO switch --detach TAG
-git add .
-git commit --message
-```
+    ```sh
+    pip install --no-build-isolation -ve .
+    ```
 
-[mambaforge]: https://github.com/conda-forge/miniforge#mambaforge
+[mamba]: https://mamba.readthedocs.io
+[c++17]: https://en.cppreference.com/w/cpp/17

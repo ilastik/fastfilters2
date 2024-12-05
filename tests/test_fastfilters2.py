@@ -1,45 +1,90 @@
-import fastfilters2
+from itertools import product
+
+import fastfilters
 import numpy
 import pytest
+import imageio.v3 as iio
 
+import fastfilters2
+import fastfilters2.compat
 
-# Kernel values are extracted from the original fastfilters library.
-KERNELS_TEXT = """
-0.3 0 0x1.fc125ap-1 0x1.f6d37ap-9
-0.3 1 0x0p+0 0x1.fffff8p-2 0x1.f04ep-25
-0.3 2 -0x1.b297d2p-1 0x1.dc3f88p-3 0x1.88f01ep-3
-0.7 0 0x1.23c2d4p-1 0x1.a4a892p-3 0x1.3b317p-7 0x1.eaf0acp-15
-0.7 1 0x0p+0 0x1.ae4b2p-2 0x1.426996p-5 0x1.78a37cp-12
-0.7 2 -0x1.21997cp+0 0x1.b38f4ep-2 0x1.19b9b4p-3 0x1.6367bap-9
-1.0 0 0x1.98a0a4p-2 0x1.efb0bp-3 0x1.ba69eap-5 0x1.228634p-8
-1.0 1 0x0p+0 0x1.ef97dcp-3 0x1.ba53c2p-4 0x1.b3b37cp-7 0x1.18aef2p-11
-1.0 2 -0x1.98c6ep-2 0x1.0caf58p-17 0x1.4bf464p-3 0x1.22b3aep-5 0x1.0857dcp-9
-1.6 0 0x1.fee3dap-3 0x1.a43f28p-3 0x1.d3ce16p-4 0x1.605a9ep-5 0x1.6726acp-7 0x1.ef673ep-10
-1.6 1 0x0p+0 0x1.48654ap-4 0x1.6d8f34p-4 0x1.9d0346p-5 0x1.18a744p-6 0x1.e3e836p-9 0x1.0efcb4p-11
-1.6 2 -0x1.8f1af8p-4 -0x1.901acap-5 0x1.9b274ap-6 0x1.5a3c98p-5 0x1.7044eep-6 0x1.a82146p-8 0x1.273694p-10 0x1.052f06p-13
-3.5 0 0x1.d35556p-4 0x1.c0a47ep-4 0x1.8cefdcp-4 0x1.43a924p-4 0x1.e67286p-5 0x1.50e606p-5 0x1.ae1212p-6 0x1.f9f938p-7 0x1.124dfep-7 0x1.121abap-8 0x1.f8ddb6p-10 0x1.ac80bep-11
-3.5 1 0x0p+0 0x1.253fp-7 0x1.037324p-6 0x1.3d54d8p-6 0x1.3df4dcp-6 0x1.134234p-6 0x1.a5a90ep-7 0x1.21612p-7 0x1.66965ep-8 0x1.931dc2p-9 0x1.9c7e8ep-10 0x1.811cf2p-11 0x1.48a03ap-12 0x1.00a5a4p-13
-3.5 2 -0x1.3216dap-7 -0x1.0dda76p-7 -0x1.5e21f6p-8 -0x1.c19398p-10 0x1.86a3dcp-10 0x1.cba17p-9 0x1.1137f4p-8 0x1.f1675ep-9 0x1.7bc67ap-9 0x1.f84fa8p-10 0x1.2893b8p-10 0x1.385facp-11 0x1.28f0e2p-12 0x1.00aeaep-13 0x1.985f32p-15
-5.0 0 0x1.476faap-4 0x1.40f3d8p-4 0x1.2e43p-4 0x1.117f6ap-4 0x1.db88f4p-5 0x1.8d334p-5 0x1.3ec2b8p-5 0x1.eb8fdp-6 0x1.6c286ep-6 0x1.033262p-6 0x1.628266p-7 0x1.d1dbc8p-8 0x1.2616cp-8 0x1.64bf72p-9 0x1.9fc9dp-10 0x1.d19932p-11
-5.0 1 0x0p+0 0x1.9b6516p-9 0x1.836fe4p-8 0x1.06ecfap-7 0x1.30c4dp-7 0x1.3e3492p-7 0x1.32706p-7 0x1.13a908p-7 0x1.d2c674p-8 0x1.75c43p-8 0x1.1c013ep-8 0x1.9a87a6p-9 0x1.1ab88ap-9 0x1.73899ep-10 0x1.d255dcp-11 0x1.17c01ep-11 0x1.410bb8p-12 0x1.609b84p-13 0x1.72cca2p-14
-5.0 2 -0x1.a43f58p-9 -0x1.8b718cp-9 -0x1.45d8cp-9 -0x1.c13864p-10 -0x1.b72982p-11 0x1.7874a6p-21 0x1.687732p-11 0x1.2f1446p-10 0x1.6cd17ap-10 0x1.74d9d2p-10 0x1.558118p-10 0x1.1f3dbcp-10 0x1.c1a0fap-11 0x1.4a1abp-11 0x1.c91984p-12 0x1.2b961cp-12 0x1.74d69ep-13 0x1.b9aa5ep-14 0x1.f3609ap-15 0x1.0e78dp-15 0x1.1a7ff8p-16
-10.0 0 0x1.478f58p-5 0x1.45ed1ep-5 0x1.4112e6p-5 0x1.39258p-5 0x1.2e603cp-5 0x1.211216p-5 0x1.1199ep-5 0x1.0061f6p-5 0x1.dbb6f6p-6 0x1.b4f324p-6 0x1.8d59acp-6 0x1.65be86p-6 0x1.3ee18ep-6 0x1.19695cp-6 0x1.ebbf5ep-7 0x1.a95f62p-7 0x1.6c4ba8p-7 0x1.34e246p-7 0x1.034b76p-7 0x1.af008p-8 0x1.62a4b2p-8 0x1.20e8c4p-8 0x1.d208dap-9 0x1.7422dap-9 0x1.263334p-9 0x1.cc8b18p-10 0x1.64e1f4p-10 0x1.11cd7p-10 0x1.9ff20ap-11 0x1.38cc04p-11 0x1.d1c63cp-12
-10.0 1 0x0p+0 0x1.a28f98p-12 0x1.9c5452p-11 0x1.2d9c96p-10 0x1.845132p-10 0x1.d009aep-10 0x1.0785ep-9 0x1.20186p-9 0x1.31760ap-9 0x1.3ba418p-9 0x1.3eed9ep-9 0x1.3bda5p-9 0x1.332292p-9 0x1.25a204p-9 0x1.144956p-9 0x1.0010ap-9 0x1.d3d5e4p-10 0x1.a5778cp-10 0x1.769d8ap-10 0x1.48a43p-10 0x1.1ca666p-10 0x1.e6f7b8p-11 0x1.9b7662p-11 0x1.577e72p-11 0x1.1b5cf2p-11 0x1.ce0fc6p-12 0x1.7461acp-12 0x1.28ae7ap-12 0x1.d3650cp-13 0x1.6c0a66p-13 0x1.1862ccp-13 0x1.ab22fcp-14 0x1.41c66ap-14 0x1.df8366p-15 0x1.61689p-15 0x1.01a71p-15
-10.0 2 -0x1.a4a1ap-12 -0x1.9e58aep-12 -0x1.8bcdaep-12 -0x1.6deaa4p-12 -0x1.4623a4p-12 -0x1.165d96p-12 -0x1.c19c04p-13 -0x1.4fad4p-13 -0x1.b77efap-14 -0x1.a9a2ep-15 0x1.d61ba8p-24 0x1.82e9aep-15 0x1.68e7d2p-14 0x1.f3495cp-14 0x1.2f6b04p-13 0x1.55b86p-13 0x1.6d3784p-13 0x1.772a34p-13 0x1.7541d8p-13 0x1.6976c2p-13 0x1.55e15cp-13 0x1.3c9796p-13 0x1.1f908cp-13 0x1.008f1ap-13 0x1.c227bp-14 0x1.84abd8p-14 0x1.4a83c8p-14 0x1.14facap-14 0x1.c9b966p-15 0x1.7511e6p-15 0x1.2c0efap-15 0x1.dc783ep-16 0x1.759044p-16 0x1.215032p-16 0x1.bad25cp-17 0x1.4f024ap-17 0x1.f55176p-18 0x1.7330a8p-18 0x1.1030f8p-18 0x1.8bc5p-19 0x1.1db04p-19
-"""
-
+# fmt: off
 KERNELS = {
-    (float(items[0]), int(items[1])): numpy.fromiter(
-        map(float.fromhex, items[2:]), dtype=numpy.float32
-    )
-    for line in KERNELS_TEXT.splitlines()
-    if (items := line.strip().split())
+    (0.3, 0): b"\x2d\x09\x7e\x3f\xbd\x69\x7b\x3b",
+    (0.3, 1): b"\x00\x00\x00\x00\xfc\xff\xff\x3e\x00\x27\x78\x33",
+    (0.3, 2): b"\xe9\x4b\x59\xbf\xc4\x1f\x6e\x3e\x0f\x78\x44\x3e",
+    (0.7, 0): b"\x6a\xe1\x11\x3f\x49\x54\x52\x3e\xb8\x98\x1d\x3c\x56\x78\x75\x38",
+    (0.7, 1): b"\x00\x00\x00\x00\x90\x25\xd7\x3e\xcb\x34\x21\x3d\xbe\x51\xbc\x39",
+    (0.7, 2): b"\xbe\xcc\x90\xbf\xa7\xc7\xd9\x3e\xda\xdc\x0c\x3e\xdd\xb3\x31\x3b",
+    (1.0, 0): b"\x52\x50\xcc\x3e\x58\xd8\x77\x3e\xf5\x34\x5d\x3d\x1a\x43\x91\x3b",
+    (1.0, 1): b"\x00\x00\x00\x00\xee\xcb\x77\x3e\xe1\x29\xdd\x3d\xbe\xd9\x59\x3c\x79\x57\x0c\x3a",
+    (1.0, 2): b"\x70\x63\xcc\xbe\xac\x57\x06\x37\x32\xfa\x25\x3e\xd7\x59\x11\x3d\xee\x2b\x04\x3b",
+    (1.6, 0): b"\xed\x71\x7f\x3e\x94\x1f\x52\x3e\x0b\xe7\xe9\x3d\x4f\x2d\x30\x3d\x56\x93\x33\x3c\x9f\xb3\xf7\x3a",
+    (1.6, 1): b"\x00\x00\x00\x00\xa5\x32\xa4\x3d\x9a\xc7\xb6\x3d\xa3\x81\x4e\x3d\xa2\x53\x8c\x3c\x1b\xf4\x71\x3b\x5a\x7e\x07\x3a",
+    (1.6, 2): b"\x7c\x8d\xc7\xbd\x65\x0d\x48\xbd\xa5\x93\xcd\x3c\x4c\x1e\x2d\x3d\x77\x22\xb8\x3c\xa3\x10\xd4\x3b\x4a\x9b\x93\x3a\x83\x97\x02\x39",
+    (3.5, 0): b"\xab\xaa\xe9\x3d\x3f\x52\xe0\x3d\xee\x77\xc6\x3d\x92\xd4\xa1\x3d\x43\x39\x73\x3d\x03\x73\x28\x3d\x09\x09\xd7\x3c\x9c\xfc\x7c\x3c\xff\x26\x09\x3c\x5d\x0d\x89\x3b\xdb\x6e\xfc\x3a\x5f\x40\x56\x3a",
+    (3.5, 1): b"\x00\x00\x00\x00\x80\x9f\x12\x3c\x92\xb9\x81\x3c\x6c\xaa\x9e\x3c\x6e\xfa\x9e\x3c\x1a\xa1\x89\x3c\x87\xd4\x52\x3c\x90\xb0\x10\x3c\x2f\x4b\xb3\x3b\xe1\x8e\x49\x3b\x47\x3f\xce\x3a\x79\x8e\x40\x3a\x1d\x50\xa4\x39\xd2\x52\x00\x39",
+    (3.5, 2): b"\x6d\x0b\x19\xbc\x3b\xed\x06\xbc\xfb\x10\xaf\xbb\xcc\xc9\xe0\xba\xee\x51\xc3\x3a\xb8\xd0\x65\x3b\xfa\x9b\x88\x3b\xaf\xb3\x78\x3b\x3d\xe3\x3d\x3b\xd4\x27\xfc\x3a\xdc\x49\x94\x3a\xd6\x2f\x1c\x3a\x71\x78\x94\x39\x57\x57\x00\x39\x99\x2f\x4c\x38",
+    (5.0, 0): b"\xd5\xb7\xa3\x3d\xec\x79\xa0\x3d\x80\x21\x97\x3d\xb5\xbf\x88\x3d\x7a\xc4\x6d\x3d\xa0\x99\x46\x3d\x5c\x61\x1f\x3d\xe8\xc7\xf5\x3c\x37\x14\xb6\x3c\x31\x99\x81\x3c\x33\x41\x31\x3c\xe4\xed\xe8\x3b\x60\x0b\x93\x3b\xb9\x5f\x32\x3b\xe8\xe4\xcf\x3a\x99\xcc\x68\x3a",
+    (5.0, 1): b"\x00\x00\x00\x00\x8b\xb2\x4d\x3b\xf2\xb7\xc1\x3b\x7d\x76\x03\x3c\x68\x62\x18\x3c\x49\x1a\x1f\x3c\x30\x38\x19\x3c\x84\xd4\x09\x3c\x3a\x63\xe9\x3b\x18\xe2\xba\x3b\x9f\x00\x8e\x3b\xd3\x43\x4d\x3b\x45\x5c\x0d\x3b\xcf\xc4\xb9\x3a\xee\x2a\x69\x3a\x0f\xe0\x0b\x3a\xdc\x85\xa0\x39\xc2\x4d\x30\x39\x51\x66\xb9\x38",
+    (5.0, 2): b"\xac\x1f\x52\xbb\xc6\xb8\x45\xbb\x60\xec\x22\xbb\x32\x9c\xe0\xba\xc1\x94\x5b\xba\x53\x3a\x3c\x35\x99\x3b\x34\x3a\x23\x8a\x97\x3a\xbd\x68\xb6\x3a\xe9\x6c\xba\x3a\x8c\xc0\xaa\x3a\xde\x9e\x8f\x3a\x7d\xd0\x60\x3a\x58\x0d\x25\x3a\xc2\x8c\xe4\x39\x0e\xcb\x95\x39\x4f\x6b\x3a\x39\x2f\xd5\xdc\x38\x4d\xb0\x79\x38\x68\x3c\x07\x38\xfc\x3f\x8d\x37",
+    (10.0, 0): b"\xac\xc7\x23\x3d\x8f\xf6\x22\x3d\x73\x89\x20\x3d\xc0\x92\x1c\x3d\x1e\x30\x17\x3d\x0b\x89\x10\x3d\xf0\xcc\x08\x3d\xfb\x30\x00\x3d\x7b\xdb\xed\x3c\x92\x79\xda\x3c\xd6\xac\xc6\x3c\x43\xdf\xb2\x3c\xc7\x70\x9f\x3c\xae\xb4\x8c\x3c\xaf\xdf\x75\x3c\xb1\xaf\x54\x3c\xd4\x25\x36\x3c\x23\x71\x1a\x3c\xbb\xa5\x01\x3c\x40\x80\xd7\x3b\x59\x52\xb1\x3b\x62\x74\x90\x3b\x6d\x04\x69\x3b\x6d\x11\x3a\x3b\x9a\x19\x13\x3b\x8c\x45\xe6\x3a\xfa\x70\xb2\x3a\xb8\xe6\x88\x3a\x05\xf9\x4f\x3a\x02\x66\x1c\x3a\x1e\xe3\xe8\x39",
+    (10.0, 1): b"\x00\x00\x00\x00\xcc\x47\xd1\x39\x29\x2a\x4e\x3a\x4b\xce\x96\x3a\x99\x28\xc2\x3a\xd7\x04\xe8\x3a\xf0\xc2\x03\x3b\x30\x0c\x10\x3b\x05\xbb\x18\x3b\x0c\xd2\x1d\x3b\xcf\x76\x1f\x3b\x28\xed\x1d\x3b\x49\x91\x19\x3b\x02\xd1\x12\x3b\xab\x24\x0a\x3b\x50\x08\x00\x3b\xf2\xea\xe9\x3a\xc6\xbb\xd2\x3a\xc5\x4e\xbb\x3a\x18\x52\xa4\x3a\x33\x53\x8e\x3a\xdc\x7b\x73\x3a\x31\xbb\x4d\x3a\x39\xbf\x2b\x3a\x79\xae\x0d\x3a\xe3\x07\xe7\x39\xd6\x30\xba\x39\x3d\x57\x94\x39\x86\xb2\x69\x39\x33\x05\x36\x39\x66\x31\x0c\x39\x7e\x91\xd5\x38\x35\xe3\xa0\x38\xb3\xc1\x6f\x38\x48\xb4\x30\x38\x88\xd3\x00\x38",
+    (10.0, 2): b"\xd0\x50\xd2\xb9\x57\x2c\xcf\xb9\xd7\xe6\xc5\xb9\x52\xf5\xb6\xb9\xd2\x11\xa3\xb9\xcb\x2e\x8b\xb9\x02\xce\x60\xb9\xa0\xd6\x27\xb9\x7d\xbf\xdb\xb8\x70\xd1\x54\xb8\xd4\x0d\xeb\x33\xd7\x74\x41\x38\xe9\x73\xb4\x38\xae\xa4\xf9\x38\x82\xb5\x17\x39\x30\xdc\x2a\x39\xc2\x9b\x36\x39\x1a\x95\x3b\x39\xec\xa0\x3a\x39\x61\xbb\x34\x39\xae\xf0\x2a\x39\xcb\x4b\x1e\x39\x46\xc8\x0f\x39\x8d\x47\x00\x39\xd8\x13\xe1\x38\xec\x55\xc2\x38\xe4\x41\xa5\x38\x65\x7d\x8a\x38\xb3\xdc\x64\x38\xf3\x88\x3a\x38\x7d\x07\x16\x38\x1f\x3c\xee\x37\x22\xc8\xba\x37\x19\xa8\x90\x37\x2e\x69\x5d\x37\x25\x81\x27\x37\xbb\xa8\xfa\x36\x54\x98\xb9\x36\x7c\x18\x88\x36\x80\xe2\x45\x36\x20\xd8\x0e\x36",
 }
+# fmt: on
+
+FILTERS = (
+    "gaussianSmoothing",
+    "gaussianGradientMagnitude",
+    "laplacianOfGaussian",
+    "hessianOfGaussianEigenvalues",
+    "structureTensorEigenvalues",
+)
+SCALES = tuple(sorted(set(scale for scale, _ in KERNELS)))
+ORDERS = tuple(sorted(set(order for _, order in KERNELS)))
+
+RNG = numpy.random.default_rng(seed=42)
 
 
-@pytest.mark.parametrize("scale", [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0])
-@pytest.mark.parametrize("order", [0, 1, 2])
-def test_gaussian_kernel(scale, order):
-    actual = fastfilters2.gaussian_kernel(scale, order=order)
-    desired = KERNELS[scale, order]
-    numpy.testing.assert_array_almost_equal_nulp(actual, desired)
+def sample_data(ndim: int) -> numpy.ndarray:
+    dtype = numpy.float32
+    if ndim == 2:
+        return iio.imread("imageio:wikkie.png").mean(axis=-1).astype(dtype)
+    if ndim == 3:
+        arr = iio.imread("imageio:stent.npz")[96:160, 32:96, 32:96].astype(dtype)
+        return arr / arr.max() * 255
+    raise ValueError(f"unsupported number of dimensions: {ndim}")
+
+
+def ids(value):
+    if isinstance(value, tuple):
+        return "x".join(map(str, value))
+
+
+def assert_msd_less(want: numpy.ndarray, got: numpy.ndarray, atol: float):
+    msd = numpy.mean(numpy.square(want - got))
+    assert msd < atol, f"mean squared difference: {msd}"
+
+
+@pytest.mark.parametrize("scale,order", product(SCALES, ORDERS))
+def test_kernels(scale: float, order: int):
+    want = numpy.frombuffer(KERNELS[scale, order], dtype=numpy.float32)
+    got = fastfilters2.gaussian_kernel(scale, order=order)
+    numpy.testing.assert_array_almost_equal_nulp(want, got)
+
+
+@pytest.mark.parametrize("name,ndim,scale", product(FILTERS, (2, 3), SCALES), ids=ids)
+def test_filters(name: str, ndim: int, scale: float):
+    filter_ff1 = getattr(fastfilters, name)
+    filter_ff2 = getattr(fastfilters2.compat, name)
+
+    data = sample_data(ndim)
+
+    args = (data, scale)
+    if name == "structureTensorEigenvalues":
+        args = (*args, 0.5 * scale)
+
+    want = filter_ff1(*args)
+    got = filter_ff2(*args)
+    assert_msd_less(want, got, 7e-5)
