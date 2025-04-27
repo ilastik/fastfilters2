@@ -40,12 +40,12 @@ def benchmark_filters(names, shapes, scales):
                     time_new = benchmark(func_new, *args)
                     speedup = time_old / time_new
 
-                    if speedup <= 0.9:
+                    if speedup < 0.9:
                         speedup_color = "red"
-                    elif speedup >= 1.1:
-                        speedup_color = "green"
-                    else:
+                    elif speedup < 1.1:
                         speedup_color = "yellow"
+                    else:
+                        speedup_color = "green"
 
                     table.add_row(
                         name,

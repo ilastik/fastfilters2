@@ -1,420 +1,536 @@
 #include "kernel.hpp"
 #include "simd.hpp"
 
+#include <hwy/aligned_allocator.h>
+
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 
-#include <algorithm>
-#include <array>
-#include <cstddef>
-#include <memory>
-#include <stdexcept>
-#include <tuple>
-#include <vector>
+#include <charconv>
 
 namespace ff = fastfilters2;
 namespace nb = nanobind;
 
-using ff::simd::Op;
-using ndarray_in = nb::ndarray<const float, nb::c_contig, nb::device::cpu>;
-using ndarray_out = nb::ndarray<float, nb::numpy>;
+using NDArrayIn = nb::ndarray<const float, nb::c_contig, nb::device::cpu>;
+using NDArray = nb::ndarray<float, nb::numpy>;
 
-static ndarray_out allocate_output(size_t ndim, std::array<size_t, 4> shape) {
-    size_t size = 1;
-    for (size_t i = 0; i < ndim; ++i) {
-        size *= shape[i];
-    }
-    std::unique_ptr<float[]> data{new float[size]};
-    auto cleanup = [](void *ptr) noexcept { delete[] static_cast<float *>(ptr); };
-    nb::capsule owner{data.get(), cleanup};
-    return {data.release(), ndim, shape.data(), owner};
-}
-
-class Buffers {
-    std::vector<std::unique_ptr<float[]>> data_;
+// Stores `NDArrayIn` and provides a convenient interface for `Filters`.
+class NDArrayWrapper {
+    NDArrayIn data;
 
 public:
-    float *allocate(size_t size) { return data_.emplace_back(new float[size]).get(); }
-
-    template <size_t N> std::array<float *, N> allocate(size_t size) {
-        auto begin = allocate(N * size);
-        std::array<float *, N> ptrs;
-        for (size_t i = 0; i < N; ++i) {
-            ptrs[i] = begin + i * size;
+    NDArrayWrapper(NDArrayIn data) : data{data} {
+        if (data.ndim() < 2 || data.ndim() > 3) {
+            throw std::invalid_argument{
+                "number of dimensions must be 2 or 3, got " +
+                std::to_string(data.ndim())};
         }
-        return ptrs;
-    }
-};
 
-class Convolver {
-    Buffers &buffers_;
-    ff::simd::Shape shape_;
-    double scale_;
-    double truncate_;
-    std::array<std::tuple<float *, size_t>, 3> kernels_;
-    float *scratch_;
-
-public:
-    Convolver(Buffers &buffers, ff::simd::Shape shape, double scale, double truncate)
-            : buffers_{buffers}, shape_{shape}, scale_{scale}, truncate_{truncate},
-              kernels_{} {
-        auto max_radius = ff::kernel_size(scale, truncate, 2) - 1;
-        auto scratch_size = shape_[0] + 2 * max_radius;
-        scratch_ = buffers_.allocate(scratch_size);
-        std::fill_n(scratch_, scratch_size, 0);
-    }
-
-    void convolve(int dim, const float *src, int order, float *dst) {
-        auto [kernel, ksize] = kernels_[order];
-        if (!kernel) {
-            ksize = ff::kernel_size(scale_, truncate_, order);
-            for (auto d : shape_) {
-                if (d > 1 && d < ksize) {
-                    throw std::invalid_argument{"data is too small"};
-                }
+        for (size_t i = 0; i < data.ndim(); ++i) {
+            if (data.shape(i) == 0) {
+                throw std::invalid_argument{"data cannot be empty"};
             }
-            kernel = buffers_.allocate(ksize);
-            kernels_[order] = {kernel, ksize};
-            ff::gaussian_kernel(kernel, ksize, scale_, order);
-        }
-        ff::simd::convolve(dim, {src, shape_}, {kernel, ksize, order}, dst, scratch_);
-    }
-
-    void sequence(const float *src, int order_x, float *dst_x, int order_y,
-                  float *dst_y) {
-        sequence(src, order_x, dst_x, order_y, dst_y, 0, nullptr);
-    }
-
-    void sequence(const float *src, int order_x, float *dst_x, int order_y,
-                  float *dst_y, int order_z, float *dst_z) {
-        if (dst_x) {
-            convolve(0, src, order_x, dst_x);
-            src = dst_x;
-        }
-        if (dst_y) {
-            convolve(1, src, order_y, dst_y);
-            src = dst_y;
-        }
-        if (dst_z) {
-            convolve(2, src, order_z, dst_z);
+            if (data.shape(i) == 1) {
+                throw std::invalid_argument{"data cannot have singleton dimensions"};
+            }
         }
     }
 
-    void derivative(int order, const float *src, float *tmp, float *dst_x,
-                    float *dst_y) {
-        sequence(src, order, tmp, 0, dst_x);
-        sequence(src, 0, tmp, order, dst_y);
-    }
-
-    void derivative(int order, const float *src, float *tmp, float *dst_x, float *dst_y,
-                    float *dst_z) {
-        sequence(src, order, dst_x, 0, tmp, 0, dst_x);
-        sequence(src, 0, dst_z, order, tmp, 0, dst_y);
-        sequence(dst_z, 0, nullptr, 0, tmp, order, dst_z);
-    }
-
-    void hessian(const float *src, float *tmp, float *dst_xx, float *dst_xy,
-                 float *dst_yy) {
-        sequence(src, 2, tmp, 0, dst_xx);
-        sequence(src, 1, tmp, 1, dst_xy);
-        sequence(src, 0, tmp, 2, dst_yy);
-    }
-
-    void hessian(const float *src, float *tmp, float *dst_xx, float *dst_xy,
-                 float *dst_xz, float *dst_yy, float *dst_yz, float *dst_zz) {
-        sequence(src, 2, dst_xx, 0, tmp, 0, dst_xx);
-        sequence(src, 1, dst_xz, 1, tmp, 0, dst_xy);
-        sequence(dst_xz, 1, nullptr, 0, tmp, 1, dst_xz);
-        sequence(src, 0, dst_zz, 2, tmp, 0, dst_yy);
-        sequence(dst_zz, 0, nullptr, 1, tmp, 1, dst_yz);
-        sequence(dst_zz, 0, nullptr, 0, tmp, 2, dst_zz);
-    }
+    size_t shape(size_t i) const noexcept { return data.shape(i); }
+    size_t ndim() const noexcept { return data.ndim(); }
+    const float *get() const noexcept { return data.data(); }
+    operator const float *() const noexcept { return data.data(); }
 };
 
-class Context {
-    ndarray_in src_;
-    ff::simd::Shape shape_;
-    size_t size;
-    ndarray_out dst_;
-    Buffers buffers_;
-
-public:
-    Context(ndarray_in src, size_t channels = 1) : src_{src} {
-        shape_[0] = std::max(ff::simd::convolve_width(), src.shape(src.ndim() - 1));
-        shape_[1] = src.shape(src.ndim() - 2);
-        shape_[2] = src.ndim() >= 3 ? src.shape(src.ndim() - 3) : 1;
-        size = shape_[0] * shape_[1] * shape_[2];
-
-        std::array<size_t, 4> dst_shape;
-        size_t dst_ndim = 0;
-        if (channels > 1) {
-            dst_shape[dst_ndim++] = channels;
-        }
-        for (size_t i = 0; i < src.ndim() - 1; ++i) {
-            dst_shape[dst_ndim++] = src.shape(i);
-        }
-        dst_shape[dst_ndim++] = shape_[0];
-
-        dst_ = allocate_output(dst_ndim, dst_shape);
-    }
-
-    const float *src() const { return src_.data(); }
-
-    float *dst() { return dst_.data(); }
-
-    float *allocate() { return buffers_.allocate(size); }
-
-    template <size_t N> std::array<float *, N> allocate() {
-        return buffers_.allocate<N>(size);
-    }
-
-    Convolver convolver(double scale, double truncate) {
-        return {buffers_, shape_, scale, truncate};
-    }
-
-    template <Op op, typename... Args> void ufunc(float *dst, Args... args) {
-        auto srcs = std::array{static_cast<const float *>(args)...};
-        ff::simd::ufunc(op, srcs.data(), srcs.size(), dst, size);
-    }
-
-    ndarray_out output() {
-        auto width = src_.shape(src_.ndim() - 1);
-        auto padded_width = dst_.shape(dst_.ndim() - 1);
-        if (width == padded_width) {
-            return dst_;
-        }
-
-        std::array<size_t, 4> trimmed_shape;
-        for (size_t i = 0; i < dst_.ndim() - 1; ++i) {
-            trimmed_shape[i] = dst_.shape(i);
-        }
-        trimmed_shape[dst_.ndim() - 1] = width;
-        auto trimmed = allocate_output(dst_.ndim(), trimmed_shape);
-
-        auto p = dst_.data();
-        auto q = trimmed.data();
-        for (size_t i = 0; i < trimmed.size(); i += width) {
-            std::copy_n(p, width, q);
-            p += padded_width;
-            q += width;
-        }
-
-        return trimmed;
-    }
-};
-
-namespace validate {
-static void scale(double scale) {
-    if (scale <= 0) {
-        throw std::invalid_argument{"scale must be positive"};
-    }
-}
-
-static void truncate(double truncate) {
-    if (truncate < 0) {
-        throw std::invalid_argument{"truncate must be positive or zero"};
-    }
-}
-
-static void order(int order) {
-    if (order < 0 || order > 2) {
-        throw std::invalid_argument{"order must be between 0 and 2"};
-    }
-}
-
-static void filter_args(ndarray_in data, double scale, double truncate) {
-    if (data.ndim() < 2 || data.ndim() > 3) {
-        throw std::invalid_argument{"data must be 2D or 3D"};
-    }
-    for (size_t i = 0; i < data.ndim(); ++i) {
-        if (data.shape(i) == 0) {
-            throw std::invalid_argument{"data cannot be empty"};
-        }
-        if (data.shape(i) == 1) {
-            throw std::invalid_argument{"data cannot have singleton dimensions"};
-        }
-    }
-    validate::scale(scale);
-    validate::truncate(truncate);
-}
-} // namespace validate
-
-namespace py {
-static ndarray_out gaussian_kernel(double scale, double truncate, int order) {
-    validate::scale(scale);
-    validate::truncate(truncate);
-    validate::order(order);
-
-    auto kernel = allocate_output(1, {ff::kernel_size(scale, truncate, order)});
-    ff::gaussian_kernel(kernel.data(), kernel.shape(0), scale, order);
-    return kernel;
-}
-
-static ndarray_out gaussian_smoothing(ndarray_in data, double scale, double truncate,
-                                      int order) {
-    validate::filter_args(data, scale, truncate);
-    validate::order(order);
-
-    Context ctx{data};
-    auto conv = ctx.convolver(scale, truncate);
-    auto dst = ctx.dst();
-    auto tmp = ctx.allocate();
-
-    if (data.ndim() == 2) {
-        conv.sequence(ctx.src(), order, tmp, order, dst);
-    } else {
-        conv.sequence(ctx.src(), order, dst, order, tmp, order, dst);
-    }
-
-    return ctx.output();
-}
-
-static ndarray_out gaussian_gradient_magnitude(ndarray_in data, double scale,
-                                               double truncate) {
-    validate::filter_args(data, scale, truncate);
-
-    Context ctx{data};
-    auto conv = ctx.convolver(scale, truncate);
-    auto dst = ctx.dst();
-
-    if (data.ndim() == 2) {
-        auto [x1, y1] = ctx.allocate<2>();
-        conv.derivative(1, ctx.src(), dst, x1, y1);
-        ctx.ufunc<Op::l2norm>(dst, x1, y1);
-
-    } else {
-        auto [x1, y1, z1] = ctx.allocate<3>();
-        conv.derivative(1, ctx.src(), dst, x1, y1, z1);
-        ctx.ufunc<Op::l2norm>(dst, x1, y1, z1);
-    }
-
-    return ctx.output();
-}
-
-static ndarray_out laplacian_of_gaussian(ndarray_in data, double scale,
-                                         double truncate) {
-    validate::filter_args(data, scale, truncate);
-
-    Context ctx{data};
-    auto conv = ctx.convolver(scale, truncate);
-    auto dst = ctx.dst();
-
-    if (data.ndim() == 2) {
-        auto [x2, y2] = ctx.allocate<2>();
-        conv.derivative(2, ctx.src(), dst, x2, y2);
-        ctx.ufunc<Op::add>(dst, x2, y2);
-
-    } else {
-        auto [x2, y2, z2] = ctx.allocate<3>();
-        conv.derivative(2, ctx.src(), dst, x2, y2, z2);
-        ctx.ufunc<Op::add>(dst, x2, y2, z2);
-    }
-
-    return ctx.output();
-}
-
-static ndarray_out hessian_of_gaussian_eigenvalues(ndarray_in data, double scale,
-                                                   double truncate) {
-    validate::filter_args(data, scale, truncate);
-
-    Context ctx{data, data.ndim()};
-    auto conv = ctx.convolver(scale, truncate);
-    auto dst = ctx.dst();
-
-    if (data.ndim() == 2) {
-        auto [xx, xy, yy] = ctx.allocate<3>();
-        conv.hessian(ctx.src(), dst, xx, xy, yy);
-        ctx.ufunc<Op::eigenvalues>(dst, xx, xy, yy);
-
-    } else {
-        auto [xx, xy, xz, yy, yz, zz] = ctx.allocate<6>();
-        conv.hessian(ctx.src(), dst, xx, xy, xz, yy, yz, zz);
-        ctx.ufunc<Op::eigenvalues>(dst, xx, xy, xz, yy, yz, zz);
-    }
-
-    return ctx.output();
-}
-
-static ndarray_out structure_tensor_eigenvalues(ndarray_in data, double scale,
-                                                double truncate, double smooth_scale) {
-    validate::filter_args(data, scale, truncate);
-
-    Context ctx{data, data.ndim()};
-    if (smooth_scale < 0) {
-        throw std::invalid_argument{"smooth_scale must be positive or zero"};
-    }
-    if (smooth_scale == 0) {
-        smooth_scale = 0.5 * scale;
-    }
-
-    auto conv = ctx.convolver(scale, truncate);
-    auto smooth = ctx.convolver(smooth_scale, truncate);
-    auto dst = ctx.dst();
-
-    auto mul_smooth = [&](const float *lhs, const float *rhs, float *tmp, float *dst) {
-        if (data.ndim() == 2) {
-            ctx.ufunc<Op::mul>(dst, lhs, rhs);
-            smooth.sequence(dst, 0, tmp, 0, dst);
-        } else {
-            ctx.ufunc<Op::mul>(tmp, lhs, rhs);
-            smooth.sequence(tmp, 0, dst, 0, tmp, 0, dst);
-        }
+// `std::unique_ptr` with a custom allocator, and the ability to decay to a raw pointer.
+class Buffer {
+    struct Deleter {
+        void operator()(void *ptr) const noexcept { deallocate(ptr); }
     };
 
-    if (data.ndim() == 2) {
-        auto [x1, y1, xx, xy, yy] = ctx.allocate<5>();
-        conv.derivative(1, ctx.src(), dst, x1, y1);
-        mul_smooth(x1, x1, dst, xx);
-        mul_smooth(x1, y1, dst, xy);
-        mul_smooth(y1, y1, dst, yy);
-        ctx.ufunc<Op::eigenvalues>(dst, xx, xy, yy);
+    std::unique_ptr<float[], Deleter> ptr;
 
-    } else {
-        auto [x1, y1, z1, xx, xy, xz, yy, yz, zz] = ctx.allocate<9>();
-        conv.derivative(1, ctx.src(), dst, x1, y1, z1);
-        mul_smooth(x1, x1, dst, xx);
-        mul_smooth(x1, y1, dst, xy);
-        mul_smooth(x1, z1, dst, xz);
-        mul_smooth(y1, y1, dst, yy);
-        mul_smooth(y1, z1, dst, yz);
-        mul_smooth(z1, z1, dst, zz);
-        ctx.ufunc<Op::eigenvalues>(dst, xx, xy, xz, yy, yz, zz);
+public:
+    static void deallocate(void *ptr) noexcept {
+        hwy::FreeAlignedBytes(ptr, nullptr, nullptr);
     }
 
-    return ctx.output();
-}
-} // namespace py
+    Buffer() = default;
+
+    explicit Buffer(size_t size)
+            : ptr{hwy::detail::AllocateAlignedItems<float>(size, nullptr, nullptr)} {
+        if (!ptr) {
+            throw std::bad_alloc{};
+        }
+    }
+
+    float *get() noexcept { return ptr.get(); }
+    const float *get() const noexcept { return ptr.get(); }
+
+    operator float *() noexcept { return ptr.get(); }
+    operator const float *() const noexcept { return ptr.get(); }
+
+    float *release() noexcept { return ptr.release(); }
+};
+
+// Stores kernel data and some of kernel parameters.
+class Kernel {
+    size_t size_;
+    Buffer data_;
+    int order_;
+
+public:
+    explicit Kernel(double scale, double truncate, int order)
+            : size_{ff::kernel_size(scale, truncate, order)},
+              data_{size_},
+              order_{order} {
+        ff::gaussian_kernel(data_, size_, scale, order);
+    }
+
+    const float *data() const noexcept { return data_.get(); }
+    size_t size() const noexcept { return size_; }
+    int order() const noexcept { return order_; }
+
+    operator ff::simd::KernelView() const noexcept {
+        return {data_.get(), size_, order_};
+    }
+};
+
+// Shared context for the filter operations.
+class Filters {
+    static constexpr size_t max_ndim = 3;
+    using ConvShape = std::array<size_t, max_ndim>;
+
+    static ConvShape conv_shape(NDArrayIn data) {
+        ConvShape shape;
+        for (size_t i = 0, j = 0; i < shape.size(); ++i) {
+            // Set the missing leftmost dimensions to 1.
+            shape[i] = data.ndim() + i < shape.size() ? 1 : data.shape(j++);
+        }
+
+        // Round the last dimension up to the nearest multiple of `lane_count`.
+        auto mask = ff::simd::lane_count() - 1;
+        shape[shape.size() - 1] = (shape[shape.size() - 1] + mask) & ~mask;
+
+        return shape;
+    }
+
+    NDArrayWrapper data;
+    double scale;
+    double truncate;
+    ConvShape buf_shape;
+    size_t buf_size;
+    Buffer row_buf;
+
+    template <size_t N> std::array<Buffer, N> allocate_buffers() {
+        std::array<Buffer, N> bufs;
+        for (auto &buf : bufs) {
+            buf = Buffer{buf_size};
+        }
+        return bufs;
+    }
+
+    Buffer allocate_output(size_t n_channels = 1) {
+        return Buffer{n_channels * buf_size};
+    }
+
+    NDArray into_result(Buffer &src, size_t n_channels = 1) {
+        size_t shape[max_ndim + 1];
+        int64_t strides[max_ndim + 1];
+        size_t ndim = 0;
+
+        if (n_channels > 1) {
+            shape[ndim++] = n_channels;
+        }
+        for (size_t i = 0; i < data.ndim(); ++i) {
+            shape[ndim++] = data.shape(i);
+        }
+
+        // Stride of the second-to-last dimension might be different due to the padding
+        // introduced in `conv_shape`.
+        strides[ndim - 1] = 1;
+        strides[ndim - 2] = buf_shape[buf_shape.size() - 1];
+        for (size_t i = ndim - 2; i-- > 0;) {
+            strides[i] = strides[i + 1] * shape[i + 1];
+        }
+
+        auto raw = src.release();
+        return {raw, ndim, shape, nb::capsule{raw, src.deallocate}, strides};
+    }
+
+    // Convolve `src` with `kernel` along `axis`, and store the result in `dst`.
+    void convolve_axis(int axis, const float *src, const Kernel &kernel, float *dst) {
+        // Check against the input data dimensions because `shape` might be padded.
+        if (data.shape(axis) < kernel.size()) {
+            throw std::invalid_argument{
+                "data dimensions are too small for the given kernel size"};
+        }
+
+        // Lazy-allocate the row buffer. Do not allocate in the constructor, when the
+        // GIL is not yet released (a small performance gain).
+        if (!row_buf) {
+            // Allocate more than the required size for the row buffer in order to avoid
+            // reallocations on larger kernels. Kernel cannot be larger than the row
+            // size, so assume that the maximum kernel size is equal to the row size.
+            auto row_buf_size = 3 * buf_shape[buf_shape.size() - 1];
+            row_buf = Buffer{row_buf_size};
+            // Need to zero-initialize this buffer because the downstream code might
+            // read uninitialized floats. This is safe by itself, because these values
+            // are unused and needed just for the SIMD padding. However, some of these
+            // values might happen to be subnormal. On some CPUs, including x86,
+            // operations on subnormals trigger an extremely slow microcode path. It is
+            // possible to avoid this on x86 by setting FTZ/DAZ CPU flags, but this
+            // approach requires saving and restoring these flags (we don't want the
+            // outside code to be influenced by this), and it is x86-only.
+            std::memset(row_buf, 0, sizeof(float) * row_buf_size);
+        }
+
+        // If source is the input data, the contiguous dimension might be different from
+        // the buffer dimension due to the padding.
+        auto shape = buf_shape;
+        if (src == data.get()) {
+            shape[buf_shape.size() - 1] = data.shape(data.ndim() - 1);
+        }
+
+        ff::simd::convolve(axis, {src, shape}, kernel, dst, row_buf);
+    }
+
+    void convolve(
+            const float *src,
+            const Kernel &kernel_x,
+            const Kernel &kernel_y,
+            float *dst_x,
+            float *dst_y) {
+        convolve_axis(2, src, kernel_x, dst_x);
+        convolve_axis(1, dst_x, kernel_y, dst_y);
+    }
+
+    void convolve(
+            const float *src,
+            const Kernel &kernel_x,
+            const Kernel &kernel_y,
+            const Kernel &kernel_z,
+            float *dst_x,
+            float *dst_y,
+            float *dst_z) {
+        convolve_axis(2, src, kernel_x, dst_x);
+        convolve_axis(1, dst_x, kernel_y, dst_y);
+        convolve_axis(0, dst_y, kernel_z, dst_z);
+    }
+
+    void l2norm(const float *x, const float *y, float *dst) {
+        ff::simd::l2norm({{x, y}, buf_size, 2}, dst);
+    }
+
+    void l2norm(const float *x, const float *y, const float *z, float *dst) {
+        ff::simd::l2norm({{x, y, z}, buf_size, 3}, dst);
+    }
+
+    void add(const float *x, const float *y, float *dst) {
+        ff::simd::add({{x, y}, buf_size, 2}, dst);
+    }
+
+    void add(const float *x, const float *y, const float *z, float *dst) {
+        ff::simd::add({{x, y, z}, buf_size, 3}, dst);
+    }
+
+    void mul_pairs(
+            const float *x,
+            const float *y,
+            float *dst_xx,
+            float *dst_xy,
+            float *dst_yy) {
+        ff::simd::mul_pairs({{x, y}, buf_size, 2}, {{dst_xx, dst_xy, dst_yy}});
+    }
+
+    void mul_pairs(
+            const float *x,
+            const float *y,
+            const float *z,
+            float *dst_xx,
+            float *dst_xy,
+            float *dst_yy,
+            float *dst_xz,
+            float *dst_yz,
+            float *dst_zz) {
+        ff::simd::mul_pairs(
+                {{x, y, z}, buf_size, 3},
+                {{dst_xx, dst_xy, dst_yy, dst_xz, dst_yz, dst_zz}});
+    }
+
+    void eigenvalues(const float *xx, const float *xy, const float *yy, float *dst) {
+        ff::simd::eigenvalues({{xx, xy, yy}, buf_size, 3}, {dst, dst + buf_size});
+    }
+
+    void eigenvalues(
+            const float *xx,
+            const float *xy,
+            const float *yy,
+            const float *xz,
+            const float *yz,
+            const float *zz,
+            float *dst) {
+        // Note the different input order. This particular order matches the old
+        // implementation.
+        ff::simd::eigenvalues(
+                {{zz, yz, xz, yy, xy, xx}, buf_size, 6},
+                {dst, dst + buf_size, dst + 2 * buf_size});
+    }
+
+public:
+    Filters(NDArrayIn data, double scale, double truncate)
+            : data{data},
+              scale{scale},
+              truncate{truncate},
+              buf_shape{conv_shape(data)},
+              buf_size{buf_shape[0] * buf_shape[1] * buf_shape[2]} {
+
+        if (scale <= 0) {
+            throw std::invalid_argument{
+                "scale must be positive, got " + std::to_string(scale)};
+        }
+        if (truncate < 0) {
+            throw std::invalid_argument{
+                "truncate must be positive or zero, got " + std::to_string(truncate)};
+        }
+    }
+
+    NDArray gaussian_derivative(int order) {
+        if (order < 0 || order > 2) {
+            throw std::invalid_argument{
+                "order must be between 0 and 2, got " + std::to_string(order)};
+        }
+
+        Buffer out;
+        {
+            nb::gil_scoped_release release;
+            out = allocate_output();
+
+            Kernel k{scale, truncate, order};
+
+            auto [tmp] = allocate_buffers<1>();
+            if (data.ndim() == 2) {
+                convolve(data, k, k, tmp, out);
+            } else if (data.ndim() == 3) {
+                convolve(data, k, k, k, out, tmp, out);
+            }
+        }
+
+        return into_result(out);
+    }
+
+    NDArray gaussian_gradient_magnitude() {
+        Buffer out;
+        {
+            nb::gil_scoped_release release;
+            out = allocate_output();
+
+            Kernel k0{scale, truncate, 0};
+            Kernel k1{scale, truncate, 1};
+
+            if (data.ndim() == 2) {
+                auto [x, y] = allocate_buffers<2>();
+                convolve(data, k1, k0, out, x);
+                convolve(data, k0, k1, out, y);
+                l2norm(x, y, out);
+
+            } else if (data.ndim() == 3) {
+                auto [x, y, z] = allocate_buffers<3>();
+                convolve(data, k1, k0, k0, x, out, x);
+                convolve(data, k0, k1, k0, y, out, y);
+                convolve(data, k0, k0, k1, z, out, z);
+                l2norm(x, y, z, out);
+            }
+        }
+
+        return into_result(out);
+    }
+
+    NDArray laplacian_of_gaussian() {
+        Buffer out;
+        {
+            nb::gil_scoped_release release;
+            out = allocate_output();
+
+            Kernel k0{scale, truncate, 0};
+            Kernel k2{scale, truncate, 2};
+
+            if (data.ndim() == 2) {
+                auto [x, y] = allocate_buffers<2>();
+                convolve(data, k2, k0, out, x);
+                convolve(data, k0, k2, out, y);
+                add(x, y, out);
+
+            } else if (data.ndim() == 3) {
+                auto [x, y, z] = allocate_buffers<3>();
+                convolve(data, k2, k0, k0, x, out, x);
+                convolve(data, k0, k2, k0, y, out, y);
+                convolve(data, k0, k0, k2, z, out, z);
+                add(x, y, z, out);
+            }
+        }
+
+        return into_result(out);
+    }
+
+    NDArray hessian_of_gaussian_eigenvalues() {
+        Buffer out;
+        {
+            nb::gil_scoped_release release;
+            out = allocate_output(data.ndim());
+
+            Kernel k0{scale, truncate, 0};
+            Kernel k1{scale, truncate, 1};
+            Kernel k2{scale, truncate, 2};
+
+            if (data.ndim() == 2) {
+                auto [xx, xy, yy] = allocate_buffers<3>();
+                convolve(data, k2, k0, out, xx);
+                convolve(data, k1, k1, out, xy);
+                convolve(data, k0, k2, out, yy);
+                eigenvalues(xx, xy, yy, out);
+
+            } else if (data.ndim() == 3) {
+                auto [xx, xy, yy, xz, yz, zz] = allocate_buffers<6>();
+                convolve(data, k2, k0, k0, xx, out, xx);
+                convolve(data, k1, k1, k0, xy, out, xy);
+                convolve(data, k0, k2, k0, yy, out, yy);
+                convolve(data, k1, k0, k1, xz, out, xz);
+                convolve(data, k0, k1, k1, yz, out, yz);
+                convolve(data, k0, k0, k2, zz, out, zz);
+                eigenvalues(xx, xy, yy, xz, yz, zz, out);
+            }
+        }
+
+        return into_result(out, data.ndim());
+    }
+
+    NDArray structure_tensor_eigenvalues(double derivative_scale) {
+        if (derivative_scale < 0) {
+            throw std::invalid_argument{
+                "derivative_scale must be positive or 0, got " +
+                std::to_string(derivative_scale)};
+        }
+        if (derivative_scale == 0) {
+            derivative_scale = 0.5 * scale;
+        }
+
+        Buffer out;
+        {
+            nb::gil_scoped_release release;
+            out = allocate_output(data.ndim());
+
+            Kernel k0{derivative_scale, truncate, 0};
+            Kernel k1{derivative_scale, truncate, 1};
+            Kernel ks{scale, truncate, 0};
+
+            if (data.ndim() == 2) {
+                auto [x, y, xx, xy, yy] = allocate_buffers<5>();
+                convolve(data, k1, k0, out, x);
+                convolve(data, k0, k1, out, y);
+                mul_pairs(x, y, xx, xy, yy);
+                convolve(xx, ks, ks, out, xx);
+                convolve(xy, ks, ks, out, xy);
+                convolve(yy, ks, ks, out, yy);
+                eigenvalues(xx, xy, yy, out);
+
+            } else if (data.ndim() == 3) {
+                auto [x, y, z, xx, xy, yy, xz, yz, zz] = allocate_buffers<9>();
+                convolve(data, k1, k0, k0, x, out, x);
+                convolve(data, k0, k1, k0, y, out, y);
+                convolve(data, k0, k0, k1, z, out, z);
+                mul_pairs(x, y, z, xx, xy, yy, xz, yz, zz);
+                convolve(xx, ks, ks, ks, xx, out, xx);
+                convolve(xy, ks, ks, ks, xy, out, xy);
+                convolve(yy, ks, ks, ks, yy, out, yy);
+                convolve(xz, ks, ks, ks, xz, out, xz);
+                convolve(yz, ks, ks, ks, yz, out, yz);
+                convolve(zz, ks, ks, ks, zz, out, zz);
+                eigenvalues(xx, xy, yy, xz, yz, zz, out);
+            }
+        }
+
+        return into_result(out, data.ndim());
+    }
+};
 
 NB_MODULE(_internal, m) {
     using namespace nb::literals;
 
-    nb::kw_only kw_only;
-    nb::call_guard<nb::gil_scoped_release> no_gil;
+    int debug = 0;
+    if (auto begin = std::getenv("FASTFILTERS2_DEBUG"); begin != nullptr) {
+        auto end = begin + std::strlen(begin);
+        auto result = std::from_chars(begin, end, debug);
+        // `std::from_chars` parses valid numeric prefixes, but we want the entire
+        // string to be a valid integer.
+        if (!(result.ptr == end && result.ec == std::errc{})) {
+            // Don't report the error, just disable the debug mode: module import must
+            // not break if a debug environment variable is malformed.
+            debug = 0;
+        }
+    }
+    ff::simd::initialize(debug);
 
-    // clang-format off
+    m.def(
+            "gaussian_smoothing",
+            [](NDArrayIn data, double scale, double truncate) {
+                return Filters{data, scale, truncate}.gaussian_derivative(0);
+            },
+            "data"_a,
+            "scale"_a,
+            nb::kw_only{},
+            "truncate"_a = 0);
 
-    m.def("gaussian_kernel", &py::gaussian_kernel,
-        "scale"_a, kw_only, "truncate"_a = 0, "order"_a = 0);
+    m.def(
+            "gaussian_gradient_magnitude",
+            [](NDArrayIn data, double scale, double truncate) {
+                return Filters{data, scale, truncate}.gaussian_gradient_magnitude();
+            },
+            "data"_a,
+            "scale"_a,
+            nb::kw_only{},
+            "truncate"_a = 0);
 
-    m.def("gaussian_smoothing", &py::gaussian_smoothing,
-        "data"_a, "scale"_a, kw_only, "truncate"_a = 0, "order"_a = 0,
-        no_gil);
+    m.def(
+            "laplacian_of_gaussian",
+            [](NDArrayIn data, double scale, double truncate) {
+                return Filters{data, scale, truncate}.laplacian_of_gaussian();
+            },
+            "data"_a,
+            "scale"_a,
+            nb::kw_only{},
+            "truncate"_a = 0);
 
-    m.def("gaussian_gradient_magnitude", &py::gaussian_gradient_magnitude,
-        "data"_a, "scale"_a, kw_only, "truncate"_a = 0,
-        no_gil);
+    m.def(
+            "hessian_of_gaussian_eigenvalues",
+            [](NDArrayIn data, double scale, double truncate) {
+                return Filters{data, scale, truncate}.hessian_of_gaussian_eigenvalues();
+            },
+            "data"_a,
+            "scale"_a,
+            nb::kw_only{},
+            "truncate"_a = 0);
 
-    m.def("laplacian_of_gaussian", &py::laplacian_of_gaussian,
-        "data"_a, "scale"_a, kw_only, "truncate"_a = 0,
-        no_gil);
+    m.def(
+            "structure_tensor_eigenvalues",
+            [](NDArrayIn data, double scale, double derivative_scale, double truncate) {
+                return Filters{data, scale, truncate}.structure_tensor_eigenvalues(
+                        derivative_scale);
+            },
+            "data"_a,
+            "scale"_a,
+            nb::kw_only{},
+            "derivative_scale"_a = 0,
+            "truncate"_a = 0);
 
-    m.def("hessian_of_gaussian_eigenvalues", &py::hessian_of_gaussian_eigenvalues,
-        "data"_a, "scale"_a, kw_only, "truncate"_a = 0,
-        no_gil);
-
-    m.def("structure_tensor_eigenvalues", &py::structure_tensor_eigenvalues,
-        "data"_a, "scale"_a, kw_only, "truncate"_a = 0, "smooth_scale"_a = 0,
-        no_gil);
-
-    // clang-format on
+    m.def(
+            "gaussian_derivative",
+            [](NDArrayIn data, double scale, int order, double truncate) {
+                return Filters{data, scale, truncate}.gaussian_derivative(order);
+            },
+            "data"_a,
+            "scale"_a,
+            nb::kw_only{},
+            "order"_a,
+            "truncate"_a = 0);
 }

@@ -1,17 +1,17 @@
 from ._internal import (
-    gaussian_kernel,
     gaussian_smoothing,
     gaussian_gradient_magnitude,
-    laplacian_of_gaussian,
     hessian_of_gaussian_eigenvalues,
+    laplacian_of_gaussian,
     structure_tensor_eigenvalues,
+    gaussian_derivative,
 )
 
 __all__ = (
-    "gaussian_kernel",
     "gaussian_smoothing",
     "gaussian_gradient_magnitude",
-    "laplacian_of_gaussian",
     "hessian_of_gaussian_eigenvalues",
+    "laplacian_of_gaussian",
     "structure_tensor_eigenvalues",
+    "gaussian_derivative",
 )

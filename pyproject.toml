@@ -65,6 +65,6 @@ archs = ["auto64"]
 test-requires = ["pytest"]
 test-command = "pytest"
 
-# Minimum macOS version for the full C++17 support.
+# Minimum macOS version required for the complete C++17 support.
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "10.14"

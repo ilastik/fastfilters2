@@ -1,39 +1,14 @@
-from itertools import product
+import contextlib
 
-import fastfilters
 import numpy
 import pytest
-import imageio.v3 as iio
 
 import fastfilters2
 import fastfilters2.compat
 
-# fmt: off
-KERNELS = {
-    (0.3, 0): b"\x2d\x09\x7e\x3f\xbd\x69\x7b\x3b",
-    (0.3, 1): b"\x00\x00\x00\x00\xfc\xff\xff\x3e\x00\x27\x78\x33",
-    (0.3, 2): b"\xe9\x4b\x59\xbf\xc4\x1f\x6e\x3e\x0f\x78\x44\x3e",
-    (0.7, 0): b"\x6a\xe1\x11\x3f\x49\x54\x52\x3e\xb8\x98\x1d\x3c\x56\x78\x75\x38",
-    (0.7, 1): b"\x00\x00\x00\x00\x90\x25\xd7\x3e\xcb\x34\x21\x3d\xbe\x51\xbc\x39",
-    (0.7, 2): b"\xbe\xcc\x90\xbf\xa7\xc7\xd9\x3e\xda\xdc\x0c\x3e\xdd\xb3\x31\x3b",
-    (1.0, 0): b"\x52\x50\xcc\x3e\x58\xd8\x77\x3e\xf5\x34\x5d\x3d\x1a\x43\x91\x3b",
-    (1.0, 1): b"\x00\x00\x00\x00\xee\xcb\x77\x3e\xe1\x29\xdd\x3d\xbe\xd9\x59\x3c\x79\x57\x0c\x3a",
-    (1.0, 2): b"\x70\x63\xcc\xbe\xac\x57\x06\x37\x32\xfa\x25\x3e\xd7\x59\x11\x3d\xee\x2b\x04\x3b",
-    (1.6, 0): b"\xed\x71\x7f\x3e\x94\x1f\x52\x3e\x0b\xe7\xe9\x3d\x4f\x2d\x30\x3d\x56\x93\x33\x3c\x9f\xb3\xf7\x3a",
-    (1.6, 1): b"\x00\x00\x00\x00\xa5\x32\xa4\x3d\x9a\xc7\xb6\x3d\xa3\x81\x4e\x3d\xa2\x53\x8c\x3c\x1b\xf4\x71\x3b\x5a\x7e\x07\x3a",
-    (1.6, 2): b"\x7c\x8d\xc7\xbd\x65\x0d\x48\xbd\xa5\x93\xcd\x3c\x4c\x1e\x2d\x3d\x77\x22\xb8\x3c\xa3\x10\xd4\x3b\x4a\x9b\x93\x3a\x83\x97\x02\x39",
-    (3.5, 0): b"\xab\xaa\xe9\x3d\x3f\x52\xe0\x3d\xee\x77\xc6\x3d\x92\xd4\xa1\x3d\x43\x39\x73\x3d\x03\x73\x28\x3d\x09\x09\xd7\x3c\x9c\xfc\x7c\x3c\xff\x26\x09\x3c\x5d\x0d\x89\x3b\xdb\x6e\xfc\x3a\x5f\x40\x56\x3a",
-    (3.5, 1): b"\x00\x00\x00\x00\x80\x9f\x12\x3c\x92\xb9\x81\x3c\x6c\xaa\x9e\x3c\x6e\xfa\x9e\x3c\x1a\xa1\x89\x3c\x87\xd4\x52\x3c\x90\xb0\x10\x3c\x2f\x4b\xb3\x3b\xe1\x8e\x49\x3b\x47\x3f\xce\x3a\x79\x8e\x40\x3a\x1d\x50\xa4\x39\xd2\x52\x00\x39",
-    (3.5, 2): b"\x6d\x0b\x19\xbc\x3b\xed\x06\xbc\xfb\x10\xaf\xbb\xcc\xc9\xe0\xba\xee\x51\xc3\x3a\xb8\xd0\x65\x3b\xfa\x9b\x88\x3b\xaf\xb3\x78\x3b\x3d\xe3\x3d\x3b\xd4\x27\xfc\x3a\xdc\x49\x94\x3a\xd6\x2f\x1c\x3a\x71\x78\x94\x39\x57\x57\x00\x39\x99\x2f\x4c\x38",
-    (5.0, 0): b"\xd5\xb7\xa3\x3d\xec\x79\xa0\x3d\x80\x21\x97\x3d\xb5\xbf\x88\x3d\x7a\xc4\x6d\x3d\xa0\x99\x46\x3d\x5c\x61\x1f\x3d\xe8\xc7\xf5\x3c\x37\x14\xb6\x3c\x31\x99\x81\x3c\x33\x41\x31\x3c\xe4\xed\xe8\x3b\x60\x0b\x93\x3b\xb9\x5f\x32\x3b\xe8\xe4\xcf\x3a\x99\xcc\x68\x3a",
-    (5.0, 1): b"\x00\x00\x00\x00\x8b\xb2\x4d\x3b\xf2\xb7\xc1\x3b\x7d\x76\x03\x3c\x68\x62\x18\x3c\x49\x1a\x1f\x3c\x30\x38\x19\x3c\x84\xd4\x09\x3c\x3a\x63\xe9\x3b\x18\xe2\xba\x3b\x9f\x00\x8e\x3b\xd3\x43\x4d\x3b\x45\x5c\x0d\x3b\xcf\xc4\xb9\x3a\xee\x2a\x69\x3a\x0f\xe0\x0b\x3a\xdc\x85\xa0\x39\xc2\x4d\x30\x39\x51\x66\xb9\x38",
-    (5.0, 2): b"\xac\x1f\x52\xbb\xc6\xb8\x45\xbb\x60\xec\x22\xbb\x32\x9c\xe0\xba\xc1\x94\x5b\xba\x53\x3a\x3c\x35\x99\x3b\x34\x3a\x23\x8a\x97\x3a\xbd\x68\xb6\x3a\xe9\x6c\xba\x3a\x8c\xc0\xaa\x3a\xde\x9e\x8f\x3a\x7d\xd0\x60\x3a\x58\x0d\x25\x3a\xc2\x8c\xe4\x39\x0e\xcb\x95\x39\x4f\x6b\x3a\x39\x2f\xd5\xdc\x38\x4d\xb0\x79\x38\x68\x3c\x07\x38\xfc\x3f\x8d\x37",
-    (10.0, 0): b"\xac\xc7\x23\x3d\x8f\xf6\x22\x3d\x73\x89\x20\x3d\xc0\x92\x1c\x3d\x1e\x30\x17\x3d\x0b\x89\x10\x3d\xf0\xcc\x08\x3d\xfb\x30\x00\x3d\x7b\xdb\xed\x3c\x92\x79\xda\x3c\xd6\xac\xc6\x3c\x43\xdf\xb2\x3c\xc7\x70\x9f\x3c\xae\xb4\x8c\x3c\xaf\xdf\x75\x3c\xb1\xaf\x54\x3c\xd4\x25\x36\x3c\x23\x71\x1a\x3c\xbb\xa5\x01\x3c\x40\x80\xd7\x3b\x59\x52\xb1\x3b\x62\x74\x90\x3b\x6d\x04\x69\x3b\x6d\x11\x3a\x3b\x9a\x19\x13\x3b\x8c\x45\xe6\x3a\xfa\x70\xb2\x3a\xb8\xe6\x88\x3a\x05\xf9\x4f\x3a\x02\x66\x1c\x3a\x1e\xe3\xe8\x39",
-    (10.0, 1): b"\x00\x00\x00\x00\xcc\x47\xd1\x39\x29\x2a\x4e\x3a\x4b\xce\x96\x3a\x99\x28\xc2\x3a\xd7\x04\xe8\x3a\xf0\xc2\x03\x3b\x30\x0c\x10\x3b\x05\xbb\x18\x3b\x0c\xd2\x1d\x3b\xcf\x76\x1f\x3b\x28\xed\x1d\x3b\x49\x91\x19\x3b\x02\xd1\x12\x3b\xab\x24\x0a\x3b\x50\x08\x00\x3b\xf2\xea\xe9\x3a\xc6\xbb\xd2\x3a\xc5\x4e\xbb\x3a\x18\x52\xa4\x3a\x33\x53\x8e\x3a\xdc\x7b\x73\x3a\x31\xbb\x4d\x3a\x39\xbf\x2b\x3a\x79\xae\x0d\x3a\xe3\x07\xe7\x39\xd6\x30\xba\x39\x3d\x57\x94\x39\x86\xb2\x69\x39\x33\x05\x36\x39\x66\x31\x0c\x39\x7e\x91\xd5\x38\x35\xe3\xa0\x38\xb3\xc1\x6f\x38\x48\xb4\x30\x38\x88\xd3\x00\x38",
-    (10.0, 2): b"\xd0\x50\xd2\xb9\x57\x2c\xcf\xb9\xd7\xe6\xc5\xb9\x52\xf5\xb6\xb9\xd2\x11\xa3\xb9\xcb\x2e\x8b\xb9\x02\xce\x60\xb9\xa0\xd6\x27\xb9\x7d\xbf\xdb\xb8\x70\xd1\x54\xb8\xd4\x0d\xeb\x33\xd7\x74\x41\x38\xe9\x73\xb4\x38\xae\xa4\xf9\x38\x82\xb5\x17\x39\x30\xdc\x2a\x39\xc2\x9b\x36\x39\x1a\x95\x3b\x39\xec\xa0\x3a\x39\x61\xbb\x34\x39\xae\xf0\x2a\x39\xcb\x4b\x1e\x39\x46\xc8\x0f\x39\x8d\x47\x00\x39\xd8\x13\xe1\x38\xec\x55\xc2\x38\xe4\x41\xa5\x38\x65\x7d\x8a\x38\xb3\xdc\x64\x38\xf3\x88\x3a\x38\x7d\x07\x16\x38\x1f\x3c\xee\x37\x22\xc8\xba\x37\x19\xa8\x90\x37\x2e\x69\x5d\x37\x25\x81\x27\x37\xbb\xa8\xfa\x36\x54\x98\xb9\x36\x7c\x18\x88\x36\x80\xe2\x45\x36\x20\xd8\x0e\x36",
-}
-# fmt: on
+fastfilters = pytest.importorskip("fastfilters")
 
+RNG = numpy.random.default_rng(seed=42)
 FILTERS = (
     "gaussianSmoothing",
     "gaussianGradientMagnitude",
@@ -41,50 +16,132 @@ FILTERS = (
     "hessianOfGaussianEigenvalues",
     "structureTensorEigenvalues",
 )
-SCALES = tuple(sorted(set(scale for scale, _ in KERNELS)))
-ORDERS = tuple(sorted(set(order for _, order in KERNELS)))
+SHAPES = ((512, 512), (64, 64, 64))
+SCALES = (0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0)
 
-RNG = numpy.random.default_rng(seed=42)
+# For each particular filter, the top percentile and the number of ULPs to allow for the
+# compatibility test. Unfortunately, it seems impossible to achieve the bit-for-bit
+# identical results without the loss of performance.
+COMPATIBILITY_PARAMS = {
+    "gaussianGradientMagnitude": (0, 1),
+    "laplacianOfGaussian": (0, 2),
+    "hessianOfGaussianEigenvalues": (0.01, 20),
+    "structureTensorEigenvalues": (0.01, 60),
+}
 
 
-def sample_data(ndim: int) -> numpy.ndarray:
+def assert_allclose_trimmed(a, b, *, tol, percentile=0):
+    """Assert that two arrays are close enough, but optionally allow for outliers.
+
+    The arrays are close if the given top percentile of the absolute differences between
+    the arrays' elements is no more than `tol`.
+
+    If the percentile is too small or 0, take the maximum absolute difference.
+    """
+    __tracebackhide__ = True
+    k = numpy.clip(round(0.01 * percentile * a.size), 1, a.size)
+    abs_diff = numpy.partition(numpy.abs(a - b), -k, axis=None)[-k]
+    if abs_diff > tol:
+        raise AssertionError(f"abs_diff = {abs_diff:.2e} > {tol:.2e} (k = {k})")
+
+
+def raises(exc):
+    """Similar to pytest.raises, but doesn't do anything if the argument is None."""
+    __tracebackhide__ = True
+    return contextlib.nullcontext() if exc is None else pytest.raises(exc)
+
+
+@pytest.mark.parametrize("scale", SCALES)
+@pytest.mark.parametrize("shape", SHAPES, ids=lambda shape: "x".join(map(str, shape)))
+@pytest.mark.parametrize("name", FILTERS)
+def test_compatibility(name, shape, scale):
     dtype = numpy.float32
-    if ndim == 2:
-        return iio.imread("imageio:wikkie.png").mean(axis=-1).astype(dtype)
-    if ndim == 3:
-        arr = iio.imread("imageio:stent.npz")[96:160, 32:96, 32:96].astype(dtype)
-        return arr / arr.max() * 255
-    raise ValueError(f"unsupported number of dimensions: {ndim}")
+    vmin, vmax = 0, 255
+    data = RNG.integers(vmin, vmax, size=shape, endpoint=True).astype(dtype)
 
-
-def ids(value):
-    if isinstance(value, tuple):
-        return "x".join(map(str, value))
-
-
-def assert_msd_less(want: numpy.ndarray, got: numpy.ndarray, atol: float):
-    msd = numpy.mean(numpy.square(want - got))
-    assert msd < atol, f"mean squared difference: {msd}"
-
-
-@pytest.mark.parametrize("scale,order", product(SCALES, ORDERS))
-def test_kernels(scale: float, order: int):
-    want = numpy.frombuffer(KERNELS[scale, order], dtype=numpy.float32)
-    got = fastfilters2.gaussian_kernel(scale, order=order)
-    numpy.testing.assert_array_almost_equal_nulp(want, got)
-
-
-@pytest.mark.parametrize("name,ndim,scale", product(FILTERS, (2, 3), SCALES), ids=ids)
-def test_filters(name: str, ndim: int, scale: float):
-    filter_ff1 = getattr(fastfilters, name)
-    filter_ff2 = getattr(fastfilters2.compat, name)
-
-    data = sample_data(ndim)
-
-    args = (data, scale)
     if name == "structureTensorEigenvalues":
-        args = (*args, 0.5 * scale)
+        args = (data, scale, 0.5 * scale)
+    else:
+        args = (data, scale)
 
-    want = filter_ff1(*args)
-    got = filter_ff2(*args)
-    assert_msd_less(want, got, 7e-5)
+    func_ff2 = getattr(fastfilters2.compat, name)
+    func_ff1 = getattr(fastfilters, name)
+
+    actual = func_ff2(*args)
+    desired = func_ff1(*args)
+
+    percentile, nulp = COMPATIBILITY_PARAMS.get(name, (0, 0))
+    max_ulp = numpy.spacing(vmax, dtype=dtype)
+    tol = dtype(nulp) * max_ulp
+
+    assert_allclose_trimmed(actual, desired, tol=tol, percentile=percentile)
+
+
+@pytest.mark.parametrize(
+    "shape, exc",
+    [
+        ((2, 2), None),
+        ((2, 2, 2), None),
+        ((2,), ValueError),
+        ((2, 2, 2, 2), ValueError),
+        ((0, 2), ValueError),
+        ((1, 2, 2, 2), ValueError),
+    ],
+)
+def test_shape(shape, exc):
+    data = numpy.zeros(shape, dtype=numpy.float32)
+    with raises(exc):
+        fastfilters2.gaussian_smoothing(data, 0.3)
+
+
+@pytest.mark.parametrize(
+    "scale, exc",
+    [(1e-5, None), (-1e-5, ValueError), (0, ValueError)],
+)
+def test_scale(scale, exc):
+    data = numpy.zeros((2, 2), dtype=numpy.float32)
+    with raises(exc):
+        fastfilters2.gaussian_smoothing(data, scale)
+
+
+@pytest.mark.parametrize(
+    "dtype, exc",
+    [
+        (numpy.uint8, None),
+        (numpy.float64, None),
+        (numpy.dtype([("field", numpy.float32)]), TypeError),
+        (numpy.void, TypeError),
+    ],
+)
+def test_dtype(dtype, exc):
+    data = numpy.zeros((2, 2), dtype=dtype)
+    with raises(exc):
+        out = fastfilters2.gaussian_smoothing(data, 0.3)
+        assert out.dtype == numpy.float32
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        [[1, 2], [3, 4]],
+        ((1, 2), (3, 4)),
+        iter([[1, 2], [3, 4]]),
+        numpy.array(["\x01\x02", "\x03\x04"]),
+    ],
+)
+def test_reject_non_array_data(data):
+    with raises(TypeError):
+        fastfilters2.gaussian_smoothing(data, 0.3)
+
+
+def test_non_contiguous():
+    data = numpy.zeros((4, 4), dtype=numpy.float32)[::2, ::2]
+    assert not data.flags.c_contiguous
+    fastfilters2.gaussian_smoothing(data, 0.3)
+
+
+def test_unaligned():
+    raw = numpy.zeros(17, dtype=numpy.uint8)
+    data = numpy.frombuffer(raw[1:], dtype=numpy.float32, count=4).reshape(2, 2)
+    assert not data.flags.aligned
+    fastfilters2.gaussian_smoothing(data, 0.3)

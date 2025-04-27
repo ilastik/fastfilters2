@@ -8,7 +8,7 @@ from rich.table import Table
 
 import fastfilters2.compat
 
-
+RNG = numpy.random.default_rng(seed=42)
 FILTERS = (
     "gaussianSmoothing",
     "gaussianGradientMagnitude",
@@ -18,8 +18,6 @@ FILTERS = (
 )
 SHAPES = ((512, 512), (64, 64, 64))
 SCALES = (0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0)
-
-RNG = numpy.random.default_rng(seed=42)
 
 
 def max_abs_diff(a, b):
@@ -32,9 +30,9 @@ def mean_square_diff(a, b):
 
 def main():
     table = Table()
-    table.add_column("Filter")
-    table.add_column("Shape")
-    table.add_column("Scale", justify="right")
+    table.add_column("filter")
+    table.add_column("shape")
+    table.add_column("scale", justify="right")
     table.add_column("max |vigra-ff1|", justify="right")
     table.add_column("max |vigra-ff2|", justify="right")
     table.add_column("max |ff1-ff2|", justify="right")
@@ -49,18 +47,17 @@ def main():
             func_ff2 = getattr(fastfilters2.compat, name)
 
             for shape in SHAPES:
-                data = RNG.integers(0, 256, size=shape, dtype=numpy.uint8)
-                data = data.astype(numpy.float32)
+                data = RNG.integers(0, 256, size=shape).astype(numpy.float32)
 
                 for scale in SCALES:
                     if name == "structureTensorEigenvalues":
-                        res_vigra = func_vigra(data, 0.5 * scale, scale)
-                        res_ff1 = func_ff1(data, scale, 0.5 * scale)
-                        res_ff2 = func_ff2(data, scale, 0.5 * scale)
+                        args = (data, scale, 0.5 * scale)
                     else:
-                        res_vigra = func_vigra(data, scale)
-                        res_ff1 = func_ff1(data, scale)
-                        res_ff2 = func_ff2(data, scale)
+                        args = (data, scale)
+
+                    res_vigra = func_vigra(*args)
+                    res_ff1 = func_ff1(*args)
+                    res_ff2 = func_ff2(*args)
 
                     mad_vigra_ff1 = max_abs_diff(res_vigra, res_ff1)
                     mad_vigra_ff2 = max_abs_diff(res_vigra, res_ff2)

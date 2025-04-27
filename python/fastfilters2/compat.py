@@ -20,25 +20,23 @@ __all__ = (
 
 
 def _wrap_vigra(func):
-    def wrapper(array, *args, **kwargs):
-        if not hasattr(array, "axistags"):
-            return func(array, *args, **kwargs)
+    def wrapper(src, *args, **kwargs):
+        if not hasattr(src, "axistags"):
+            return func(src, *args, **kwargs)
 
         if vigra is None:
             raise ModuleNotFoundError(
-                "can't handle Vigra arrays unless 'vigra' library is installed"
+                "can't handle Vigra arrays unless 'vigra' is installed"
             )
 
-        array = vigra.taggedView(numpy.ascontiguousarray(array), array.axistags)
-        squeezed = array.squeeze()
-        res = func(squeezed, *args, **kwargs)
+        data = src.squeeze()
+        out = func(data, *args, **kwargs)
 
-        if res.shape == squeezed.shape:
-            res = vigra.taggedView(res, squeezed.axistags)
-        else:
-            res = vigra.taggedView(res, [*squeezed.axistags, vigra.AxisInfo.c])
+        axistags = list(data.axistags)
+        if out.ndim > data.ndim:
+            axistags.append(vigra.AxisInfo.c)
 
-        return res.withAxes(array.axistags)
+        return vigra.taggedView(out, axistags).withAxes(src.axistags)
 
     return functools.update_wrapper(wrapper, func)
 
@@ -55,10 +53,10 @@ def gaussianGradientMagnitude(array, sigma, window_size=0.0):
 
 @_wrap_vigra
 def hessianOfGaussianEigenvalues(image, scale, window_size=0.0):
-    res = fastfilters2.hessian_of_gaussian_eigenvalues(
+    out = fastfilters2.hessian_of_gaussian_eigenvalues(
         image, scale, truncate=window_size
     )
-    return numpy.moveaxis(res, 0, -1)
+    return numpy.moveaxis(out, 0, -1)
 
 
 @_wrap_vigra
@@ -68,10 +66,10 @@ def laplacianOfGaussian(array, scale=1.0, window_size=0.0):
 
 @_wrap_vigra
 def structureTensorEigenvalues(image, innerScale, outerScale, window_size=0.0):
-    res = fastfilters2.structure_tensor_eigenvalues(
-        image, outerScale, truncate=window_size, smooth_scale=innerScale
+    out = fastfilters2.structure_tensor_eigenvalues(
+        image, innerScale, derivative_scale=outerScale, truncate=window_size
     )
-    return numpy.moveaxis(res, 0, -1)
+    return numpy.moveaxis(out, 0, -1)
 
 
 @_wrap_vigra
@@ -80,6 +78,6 @@ def gaussianDerivative(array, sigma, order, window_size=0.0):
         assert len(order) == len(array.shape)
         assert len(set(order)) == 1
         order = order[0]
-    return fastfilters2.gaussian_smoothing(
-        array, sigma, truncate=window_size, order=order
+    return fastfilters2.gaussian_derivative(
+        array, sigma, order=order, truncate=window_size
     )
