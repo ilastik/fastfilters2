@@ -158,12 +158,19 @@ class Filters {
         return {raw, ndim, shape, nb::capsule{raw, src.deallocate}, strides};
     }
 
-    // Convolve `src` with `kernel` along `axis`, and store the result in `dst`.
-    void convolve_axis(int axis, const float *src, const Kernel &kernel, float *dst) {
+    // Convolve `src` with `kernel` along `axis`, and store the result in `dst`. If
+    // `src` is `nullptr`, just return the destination pointer (useful for skipping
+    // redundant computations).
+    const float *
+    convolve_axis(int axis, const float *src, const Kernel &kernel, float *dst) {
         // Check against the input data dimensions because `shape` might be padded.
         if (data.shape(axis) < kernel.size()) {
             throw std::invalid_argument{
                 "data dimensions are too small for the given kernel size"};
+        }
+
+        if (src == nullptr) {
+            return dst;
         }
 
         // Lazy-allocate the row buffer. Do not allocate in the constructor, when the
@@ -195,17 +202,19 @@ class Filters {
         ff::simd::convolve(axis, {src, shape}, kernel, dst, row_buf);
     }
 
-    void convolve(
+    const float *convolve(
             const float *src,
             const Kernel &kernel_x,
             const Kernel &kernel_y,
             float *dst_x,
             float *dst_y) {
-        convolve_axis(2, src, kernel_x, dst_x);
-        convolve_axis(1, dst_x, kernel_y, dst_y);
+        auto ptr = src;
+        ptr = convolve_axis(2, ptr, kernel_x, dst_x);
+        ptr = convolve_axis(1, ptr, kernel_y, dst_y);
+        return ptr;
     }
 
-    void convolve(
+    const float *convolve(
             const float *src,
             const Kernel &kernel_x,
             const Kernel &kernel_y,
@@ -213,9 +222,11 @@ class Filters {
             float *dst_x,
             float *dst_y,
             float *dst_z) {
-        convolve_axis(2, src, kernel_x, dst_x);
-        convolve_axis(1, dst_x, kernel_y, dst_y);
-        convolve_axis(0, dst_y, kernel_z, dst_z);
+        auto ptr = src;
+        ptr = convolve_axis(2, ptr, kernel_x, dst_x);
+        ptr = convolve_axis(1, ptr, kernel_y, dst_y);
+        ptr = convolve_axis(0, ptr, kernel_z, dst_z);
+        return ptr;
     }
 
     void l2norm(const float *x, const float *y, float *dst) {
@@ -337,8 +348,8 @@ public:
             } else if (data.ndim() == 3) {
                 auto [x, y, z] = allocate_buffers<3>();
                 convolve(data, k1, k0, k0, x, out, x);
-                convolve(data, k0, k1, k0, y, out, y);
-                convolve(data, k0, k0, k1, z, out, z);
+                convolve(data, k0, k1, k0, z, out, y);
+                convolve(nullptr, k0, k0, k1, z, out, z);
                 l2norm(x, y, z, out);
             }
         }
@@ -364,8 +375,8 @@ public:
             } else if (data.ndim() == 3) {
                 auto [x, y, z] = allocate_buffers<3>();
                 convolve(data, k2, k0, k0, x, out, x);
-                convolve(data, k0, k2, k0, y, out, y);
-                convolve(data, k0, k0, k2, z, out, z);
+                convolve(data, k0, k2, k0, z, out, y);
+                convolve(nullptr, k0, k0, k2, z, out, z);
                 add(x, y, z, out);
             }
         }
@@ -393,11 +404,11 @@ public:
             } else if (data.ndim() == 3) {
                 auto [xx, xy, yy, xz, yz, zz] = allocate_buffers<6>();
                 convolve(data, k2, k0, k0, xx, out, xx);
-                convolve(data, k1, k1, k0, xy, out, xy);
-                convolve(data, k0, k2, k0, yy, out, yy);
-                convolve(data, k1, k0, k1, xz, out, xz);
-                convolve(data, k0, k1, k1, yz, out, yz);
-                convolve(data, k0, k0, k2, zz, out, zz);
+                convolve(data, k1, k1, k0, xz, out, xy);
+                convolve(nullptr, k1, k0, k1, xz, out, xz);
+                convolve(data, k0, k2, k0, zz, out, yy);
+                convolve(nullptr, k0, k1, k1, zz, out, yz);
+                convolve(nullptr, k0, k0, k2, zz, out, zz);
                 eigenvalues(xx, xy, yy, xz, yz, zz, out);
             }
         }
@@ -437,8 +448,8 @@ public:
             } else if (data.ndim() == 3) {
                 auto [x, y, z, xx, xy, yy, xz, yz, zz] = allocate_buffers<9>();
                 convolve(data, k1, k0, k0, x, out, x);
-                convolve(data, k0, k1, k0, y, out, y);
-                convolve(data, k0, k0, k1, z, out, z);
+                convolve(data, k0, k1, k0, z, out, y);
+                convolve(nullptr, k0, k0, k1, z, out, z);
                 mul_pairs(x, y, z, xx, xy, yy, xz, yz, zz);
                 convolve(xx, ks, ks, ks, xx, out, xx);
                 convolve(xy, ks, ks, ks, xy, out, xy);
