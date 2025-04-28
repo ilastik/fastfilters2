@@ -58,16 +58,16 @@ target_link_libraries(_internal PRIVATE hwy hwy_contrib simd)
 _target_cxx_standard(_internal 17)
 _target_cxx_warnings(_internal)
 
-nanobind_add_stub(_internal_stub
-    MODULE _internal
-    OUTPUT _internal.pyi
-    PYTHON_PATH $<TARGET_FILE_DIR:_internal>/fastfilters2
-    DEPENDS _internal
-    VERBOSE
-    MARKER_FILE py.typed)
+# nanobind_add_stub(_internal_stub
+#     MODULE _internal
+#     OUTPUT _internal.pyi
+#     PYTHON_PATH $<TARGET_FILE_DIR:_internal>/fastfilters2
+#     DEPENDS _internal
+#     VERBOSE
+#     MARKER_FILE py.typed)
 
 install(TARGETS _internal LIBRARY DESTINATION fastfilters2)
-install(FILES
-    $<TARGET_FILE_DIR:_internal>/py.typed
-    $<TARGET_FILE_DIR:_internal>/_internal.pyi
-    DESTINATION fastfilters2)
+# install(FILES
+#     $<TARGET_FILE_DIR:_internal>/py.typed
+#     $<TARGET_FILE_DIR:_internal>/_internal.pyi
+#     DESTINATION fastfilters2)
