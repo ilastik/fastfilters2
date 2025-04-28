@@ -64,7 +64,7 @@ addopts = "--quiet -ra --doctest-modules"
 build = "cp*"
 archs = ["auto64"]
 test-requires = ["pytest"]
-test-command = "pytest"
+test-command = "pytest {project}/tests"
 
 # Minimum macOS version required for the complete C++17 support.
 [tool.cibuildwheel.macos.environment]
