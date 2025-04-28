@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 
 // SIMD-accelerated functions. Dispatch to the best available implementation in runtime.
 // Before calling any function in this namespace, clients must call `initialize()`.

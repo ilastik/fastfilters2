@@ -6,7 +6,15 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 
+#include <array>
 #include <charconv>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <new>
+#include <stdexcept>
+#include <string>
+#include <system_error>
 
 namespace ff = fastfilters2;
 namespace nb = nanobind;

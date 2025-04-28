@@ -3,6 +3,10 @@
 #include <hwy/auto_tune.h>
 #include <hwy/timer.h>
 
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
 // Consecutively call `f(0)`, `f(1)`, ..., `f(15)`.
 #define CALL16(f)                                                                      \
     do {                                                                               \
