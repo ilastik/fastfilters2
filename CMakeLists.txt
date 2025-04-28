@@ -45,7 +45,7 @@ find_package(nanobind CONFIG REQUIRED)
 
 add_library(simd cpp/simd.cpp)
 target_include_directories(simd PRIVATE cpp)
-target_link_libraries(simd PRIVATE hwy)
+target_link_libraries(simd PRIVATE hwy hwy_contrib)
 set_property(TARGET simd PROPERTY POSITION_INDEPENDENT_CODE ON)
 _target_cxx_standard(simd 17)
 _target_cxx_warnings(simd)
@@ -54,7 +54,7 @@ _target_cxx_warnings(simd)
 # target_compile_options(simd PRIVATE -save-temps=obj -masm=intel -fverbose-asm)
 
 nanobind_add_module(_internal cpp/module.cpp)
-target_link_libraries(_internal PRIVATE hwy hwy_contrib simd)
+target_link_libraries(_internal PRIVATE hwy simd)
 _target_cxx_standard(_internal 17)
 _target_cxx_warnings(_internal)
 
