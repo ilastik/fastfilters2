@@ -62,6 +62,7 @@ nanobind_add_stub(_internal_stub
     MODULE _internal
     OUTPUT _internal.pyi
     PYTHON_PATH $<TARGET_FILE_DIR:_internal>/fastfilters2
+    DEPENDS _internal
     VERBOSE
     MARKER_FILE py.typed)
 
