@@ -2,6 +2,7 @@
 #include "simd.hpp"
 
 #include <hwy/aligned_allocator.h>
+#include <hwy/base.h>
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -197,7 +198,7 @@ class Filters {
             // possible to avoid this on x86 by setting FTZ/DAZ CPU flags, but this
             // approach requires saving and restoring these flags (we don't want the
             // outside code to be influenced by this), and it is x86-only.
-            std::memset(row_buf, 0, sizeof(float) * row_buf_size);
+            hwy::ZeroBytes(row_buf, sizeof(float) * row_buf_size);
         }
 
         // If source is the input data, the contiguous dimension might be different from

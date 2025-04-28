@@ -1,10 +1,10 @@
 #include "simd.hpp"
+#include "hwy/base.h"
 
 #include <hwy/auto_tune.h>
 #include <hwy/timer.h>
 
 #include <cstdio>
-#include <cstring>
 #include <vector>
 
 // Consecutively call `f(0)`, `f(1)`, ..., `f(15)`.
@@ -58,7 +58,7 @@ static HWY_INLINE void mirror_copy(
     for (size_t i = 0; i < radius; ++i) {
         dst[i] = src[radius - i];
     }
-    std::memcpy(dst + radius, src, sizeof(float) * size);
+    hwy::CopyBytes(src, dst + radius, sizeof(float) * size);
     for (size_t i = 0; i < radius; ++i) {
         dst[radius + size + i] = src[size - 2 - i];
     }
