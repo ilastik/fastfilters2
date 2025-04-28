@@ -662,9 +662,9 @@ HWY_DLLEXPORT void initialize(int debug) {
     // Enough to cover the largest unroll factor.
     constexpr size_t size = 16 * (max_lane_bytes / sizeof(float)) + 2 * radius;
 
-    alignas(max_lane_bytes) std::array<float, size> src{};
-    alignas(max_lane_bytes) std::array<float, size> dst{};
-    alignas(max_lane_bytes) std::array<float, ksize> kernel{};
+    HWY_ALIGN_MAX std::array<float, size> src{};
+    HWY_ALIGN_MAX std::array<float, size> dst{};
+    HWY_ALIGN_MAX std::array<float, ksize> kernel{};
 
     // Ensure that we are not consuming too much stack space.
     static_assert(sizeof src + sizeof dst + sizeof kernel <= 10240);
