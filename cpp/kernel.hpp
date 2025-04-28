@@ -7,13 +7,13 @@ namespace fastfilters2 {
 inline size_t kernel_size(double scale, double truncate, int order) {
     // Kernel size is computed according to the old implementation:
     // https://github.com/ilastik/fastfilters/blob/38e606fa5aacd571b07e2e34fda1fb2eeb6ca128/src/library/fir_kernel.c#L74
-    size_t radius = truncate > 0 ? std::round(truncate * scale)
-                                 : std::ceil((3 + 0.5 * order) * scale);
+    auto fradius = truncate > 0 ? std::round(truncate * scale)
+                                : std::ceil((3 + 0.5 * order) * scale);
     // Note the the old code computed `len` which is actually the radius, so we need to
     // add 1 to get the size. Also, the old code had an issue: if `truncate` and `scale`
     // are small, the radius might be 0, which produces a useless kernel. To fix this,
     // ensure that the kernel size is at least 2.
-    return radius > 0 ? radius + 1 : 2;
+    return fradius > 0 ? static_cast<size_t>(fradius) + 1 : 2;
 }
 
 inline void gaussian_kernel(float *kernel, size_t ksize, double scale, int order) {
@@ -34,13 +34,12 @@ inline void gaussian_kernel(float *kernel, size_t ksize, double scale, int order
     for (size_t x = 0; x < ksize; ++x) {
         auto x2 = x * x;
         auto g = norm * std::exp(factor * x2);
-        if (order == 0) {
-            kernel[x] = g;
-        } else if (order == 1) {
-            kernel[x] = g * x;
+        if (order == 1) {
+            g *= x;
         } else if (order == 2) {
-            kernel[x] = g * (1 - x2 * inv_scale2);
+            g *= 1 - x2 * inv_scale2;
         }
+        kernel[x] = static_cast<float>(g);
     }
 
     if (order == 2) {
@@ -48,7 +47,7 @@ inline void gaussian_kernel(float *kernel, size_t ksize, double scale, int order
         for (size_t x = 1; x < ksize; ++x) {
             sum += 2 * kernel[x];
         }
-        float dc = sum / (2 * ksize - 1);
+        auto dc = static_cast<float>(sum / (2 * ksize - 1));
         for (size_t x = 0; x < ksize; ++x) {
             kernel[x] -= dc;
         }
@@ -65,7 +64,7 @@ inline void gaussian_kernel(float *kernel, size_t ksize, double scale, int order
         }
     }
 
-    auto inv_sum = 1 / sum;
+    auto inv_sum = static_cast<float>(1 / sum);
     for (size_t x = 0; x < ksize; ++x) {
         kernel[x] *= inv_sum;
     }

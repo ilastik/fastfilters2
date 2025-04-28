@@ -4,7 +4,7 @@ project(fastfilters2 LANGUAGES CXX)
 # Enable compiler-specific warnings for the target.
 function(_target_cxx_warnings target)
     target_compile_options(${target} PRIVATE
-        $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:-Wall -Wextra -Wpedantic>
+        $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:-Wall -Wextra -Wpedantic -Wfloat-conversion>
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->)
 endfunction()
 

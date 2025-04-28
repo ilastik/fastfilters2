@@ -208,6 +208,7 @@ class Filters {
         }
 
         ff::simd::convolve(axis, {src, shape}, kernel, dst, row_buf);
+        return dst;
     }
 
     const float *convolve(

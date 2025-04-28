@@ -459,12 +459,15 @@ static void eigenvalues3d(MultiDataView<6> src, MultiOutputView<3> dst) {
     // The code below has been adapted from the old reference implementation:
     // https://github.com/ilastik/fastfilters/blob/38e606fa5aacd571b07e2e34fda1fb2eeb6ca128/src/library/linalg_avx2.c#L63
 
+    using T = hn::TFromD<D>;
+
     D d;
     HWY_LANES_CONSTEXPR auto lanes = hn::Lanes(d);
-    auto v_inv3 = hn::Set(d, 1.0 / 3.0);
-    auto v_root3 = hn::Sqrt(hn::Set(d, 3.0));
-    auto two = hn::Set(d, 2.0);
-    auto one = hn::Set(d, 1.0);
+
+    auto v_inv3 = hn::Set(d, static_cast<T>(1.0 / 3));
+    auto v_root3 = hn::Sqrt(hn::Set(d, 3));
+    auto two = hn::Set(d, 2);
+    auto one = hn::Set(d, 1);
     auto half = hn::Set(d, 0.5);
     auto zero = hn::Zero(d);
 
