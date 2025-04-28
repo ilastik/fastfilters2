@@ -10,7 +10,7 @@ endfunction()
 
 # Set the C++ standard for the target.
 function(_target_cxx_standard target std)
-    set_target_properties(${target} PROPERTIES
+    set_property(TARGET ${target} PROPERTY
         CXX_STANDARD ${std}
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF)
@@ -46,6 +46,7 @@ find_package(nanobind CONFIG REQUIRED)
 add_library(simd cpp/simd.cpp)
 target_include_directories(simd PRIVATE cpp)
 target_link_libraries(simd PRIVATE hwy)
+set_property(TARGET simd PROPERTY POSITION_INDEPENDENT_CODE ON)
 _target_cxx_standard(simd 17)
 _target_cxx_warnings(simd)
 
