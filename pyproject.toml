@@ -1,6 +1,6 @@
 [build-system]
-# nanobind requires `typing_extensions` for stubgen on Python versions older than 3.11.
-requires = ["scikit-build-core", "nanobind", "typing_extensions"]
+# nanobind requires `typing-extensions` for stubgen on Python versions older than 3.11.
+requires = ["scikit-build-core", "nanobind", "typing-extensions"]
 build-backend = "scikit_build_core.build"
 
 [project]
