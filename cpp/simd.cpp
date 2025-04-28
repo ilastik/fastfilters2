@@ -107,7 +107,11 @@ static HWY_INLINE void conv_lanes(
 // Initialize an accumulator with `src[0] * kernel[0]` (central element of the kernel).
 #define INIT(i)                                                                        \
     if constexpr (i < unroll) {                                                        \
-        v##i = hn::Mul(hn::Load(d, src + i * lanes), kv);                              \
+        if (contiguous) {                                                              \
+            v##i = hn::Mul(hn::LoadU(d, src + i * lanes), kv);                         \
+        } else {                                                                       \
+            v##i = hn::Mul(hn::Load(d, src + i * lanes), kv);                          \
+        }                                                                              \
     }
 
 // Add `(src[k] ? src[-k]) * kernel[k]` to accumulator, where `?` is either `+` or `-`.
