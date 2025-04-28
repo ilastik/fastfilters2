@@ -26,10 +26,19 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
+set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/_deps)
+include(FetchContent)
+
+# Configure Highway
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "")
 set(HWY_ENABLE_TESTS OFF CACHE BOOL "")
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "")
-add_subdirectory(deps/highway)
+FetchContent_Declare(
+    highway
+    GIT_REPOSITORY https://github.com/google/highway.git
+    GIT_TAG c02c0e318b22b1e456601ec392d80e679ef6bc1e
+)
+FetchContent_MakeAvailable(highway)
 
 find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(nanobind CONFIG REQUIRED)
@@ -40,10 +49,7 @@ target_link_libraries(simd PRIVATE hwy)
 _target_cxx_standard(simd 17)
 _target_cxx_warnings(simd)
 
-# Print low-level debug messages.
-# target_compile_definitions(simd PRIVATE FASTFILTERS2_DEBUG)
-
-# Generate assembly code for inspection on GCC/Clang for x86.
+# Save x86 assembly listings in the build directory (GCC-compatible compilers).
 # target_compile_options(simd PRIVATE -save-temps=obj -masm=intel -fverbose-asm)
 
 nanobind_add_module(_internal cpp/module.cpp)
