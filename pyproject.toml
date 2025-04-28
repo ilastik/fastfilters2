@@ -61,7 +61,7 @@ testpaths = ["tests"]
 addopts = "--quiet -ra --doctest-modules"
 
 [tool.cibuildwheel]
-skip = "pp*"
+build = "cp*"
 archs = ["auto64"]
 test-requires = ["pytest"]
 test-command = "pytest"
