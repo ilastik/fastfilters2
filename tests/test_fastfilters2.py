@@ -77,6 +77,15 @@ def test_compatibility(name, shape, scale):
     assert_allclose_trimmed(actual, desired, tol=tol, percentile=percentile)
 
 
+def test_compatibility_small_data():
+    data = numpy.arange(24).reshape(2, 3, 4).astype(numpy.float32)
+    scale = 0.3
+    actual = fastfilters2.gaussian_smoothing(data, scale)
+    desired = fastfilters.gaussianSmoothing(data, scale)
+    tol = numpy.spacing(numpy.max(data), dtype=numpy.float32)
+    assert_allclose_trimmed(actual, desired, tol=tol)
+
+
 @pytest.mark.parametrize(
     "shape, exc",
     [
