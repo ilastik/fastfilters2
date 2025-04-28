@@ -9,6 +9,7 @@
 
 #include <array>
 #include <charconv>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -42,6 +43,10 @@ public:
             if (data.shape(i) == 1) {
                 throw std::invalid_argument{"data cannot have singleton dimensions"};
             }
+        }
+
+        if (reinterpret_cast<uintptr_t>(data.data()) % alignof(float) != 0) {
+            throw std::invalid_argument{"misaligned data is not supported"};
         }
     }
 

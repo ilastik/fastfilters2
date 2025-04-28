@@ -81,8 +81,10 @@ def test_non_contiguous():
     fastfilters2.gaussian_smoothing(data, 0.3)
 
 
-def test_unaligned():
+def test_reject_unaligned_data():
+    # Roundabout way to create a misaligned NumPy array.
     raw = numpy.zeros(17, dtype=numpy.uint8)
     data = numpy.frombuffer(raw[1:], dtype=numpy.float32, count=4).reshape(2, 2)
     assert not data.flags.aligned
-    fastfilters2.gaussian_smoothing(data, 0.3)
+    with raises(ValueError):
+        fastfilters2.gaussian_smoothing(data, 0.3)
