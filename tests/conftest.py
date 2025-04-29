@@ -8,8 +8,8 @@ def _is_shape(value):
 
 def pytest_make_parametrize_id(config, val, argname):
     # Make names of parametrized tests prettier for certain arguments.
-    if argname == "shape" and _is_shape(val):
+    if argname.endswith("shape") and _is_shape(val):
         return "x".join(map(str, val))
-    if argname == "dtype" and isinstance(val, numpy.dtype):
+    if argname.endswith("dtype") and isinstance(val, numpy.dtype):
         return val.name
     return None
