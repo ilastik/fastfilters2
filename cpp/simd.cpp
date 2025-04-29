@@ -1,5 +1,7 @@
 #include "simd.hpp"
+
 #include "hwy/base.h"
+#include "hwy/per_target.h"
 
 #include <hwy/auto_tune.h>
 #include <hwy/timer.h>
@@ -169,8 +171,10 @@ static HWY_INLINE void conv_lanes(
 #undef STORE
 }
 
-// Convolve across the contiguous dimension. `row_size` is the size of the
-// contiguous dimension, and `total_size` is the total size of the image.
+// Convolve across the contiguous dimension. `row_size` is the size of the contiguous
+// dimension, and `row_count` is the total number of rows. The destination buffer size
+// is `round_up(row_size, lane_count()) * row_count`: each row is padded to the next
+// multiple of `lane_count()`.
 template <bool symmetric, size_t unroll>
 static void conv_contiguous(
         const float *src,
@@ -196,11 +200,11 @@ static void conv_contiguous(
     for (size_t row_idx = 0; row_idx < row_count;
          ++row_idx, src += row_size, dst += dst_row_size) {
 
-        // Because the row is contiguous in memory, we need to physically mirror the
-        // row edges so that `conv_lanes` can access the mirrored pixels. It might
-        // be beneficial to shuffle the pixels instead of copying, but shuffle
-        // instructions are usually slower than direct loads. Also, copying
-        // automatically pads the input up to the batch size.
+        // Because the row is contiguous in memory, we need to physically mirror the row
+        // edges so that `conv_lanes` can access the mirrored pixels. It might be
+        // tempting to shuffle the pixels just before the computation, but shuffles are
+        // usually slower than direct loads for large radii. Also, copying implicitly
+        // pads the input due to the `row_buf` being sufficiently large.
         mirror_copy(src, row_buf, row_size, radius);
 
         // Process the row in batches.
@@ -211,6 +215,8 @@ static void conv_contiguous(
                         src_row + i, kernel.data, kernel.size, dst + i, 0, 0, 0);
             }
         }
+
+        // Process the remaining elements with a single accumulator.
         for (; i < row_size; i += lanes) {
             conv_lanes<true, symmetric, 1>(
                     src_row + i, kernel.data, kernel.size, dst + i, 0, 0, 0);
@@ -219,9 +225,9 @@ static void conv_contiguous(
 }
 
 // Convolve across the non-contiguous dimension. `row_size` is the size of the
-// contiguous dimension. Inner and outer sizes are the sizes of the main
-// (convolution) and all other axes. Inner and outer strides are defined
-// accordingly.
+// contiguous dimension. Inner and outer sizes are the sizes of the main axis (across
+// which the convolution is performed) and all other axes. Inner and outer strides are
+// defined accordingly.
 template <bool symmetric, size_t unroll>
 static void conv_strided(
         const float *src,
@@ -271,6 +277,7 @@ static void conv_strided(
             }
         }
 
+        // Process the remaining elements with a single accumulator.
         for (; i < row_size; i += lanes) {
             auto src_strip = src_plane + i;
             auto dst_strip = dst_plane + i;
@@ -292,7 +299,7 @@ static void conv_strided(
 // Convolve across the specified axis, unrolled by the `unroll` lanes.
 template <size_t unroll>
 static void
-conv_unroll(int axis, DataView3D src, KernelView kernel, float *dst, float *row_buf) {
+convolve(int axis, DataView3D src, KernelView kernel, float *dst, float *row_buf) {
     auto symmetric = kernel.order % 2 == 0;
     auto row_size = src.shape[2];
 
@@ -593,9 +600,7 @@ void eigenvalues(MultiDataView<6> src, MultiOutputView<3> dst) {
     }
 }
 
-size_t lane_count() { return hn::Lanes(D{}); }
-
-// For the given unroll factor, define the corresponding convolve and auto-tuning
+// For the given unroll factor, define the corresponding autotune and convolve
 // functions.
 #define DEF_UNROLLED(unroll)                                                           \
     void autotune##unroll(                                                             \
@@ -610,7 +615,7 @@ size_t lane_count() { return hn::Lanes(D{}); }
     }                                                                                  \
     void convolve##unroll(                                                             \
             int axis, DataView3D src, KernelView kernel, float *dst, float *row_buf) { \
-        conv_unroll<unroll>(axis, src, kernel, dst, row_buf);                          \
+        convolve<unroll>(axis, src, kernel, dst, row_buf);                             \
     }                                                                                  \
     static_assert(true, "For requiring trailing semicolon")
 
@@ -642,8 +647,6 @@ HWY_EXPORT(convolve2);
 HWY_EXPORT(convolve4);
 HWY_EXPORT(convolve8);
 HWY_EXPORT(convolve16);
-
-HWY_EXPORT(lane_count);
 
 HWY_EXPORT(l2norm);
 HWY_EXPORT(add);
@@ -694,7 +697,7 @@ HWY_DLLEXPORT void initialize(int debug) {
     static_assert(autotune_funcs.size() == convolve_funcs.size());
     constexpr auto N = autotune_funcs.size();
 
-    hwy::AutoTune<size_t, 12> tuner;
+    hwy::AutoTune<size_t, 10> tuner;
     std::vector<size_t> candidates;
     for (size_t i = 0; i < N; ++i) {
         candidates.push_back(i);
@@ -740,7 +743,7 @@ HWY_DLLEXPORT void initialize(int debug) {
         std::fprintf(stderr, "> unroll=%zu\n", unroll_from_index(best));
     }
 
-    g_lane_count = HWY_DYNAMIC_DISPATCH(lane_count)();
+    g_lane_count = hwy::VectorBytes() / sizeof(float);
     g_convolve = convolve_funcs[best];
 }
 

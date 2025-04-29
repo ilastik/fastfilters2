@@ -61,10 +61,10 @@ size_t lane_count();
 // where `row_size` is the last dimension of `src` and `radius` is the radius of the
 // `kernel`. `axis` must be a valid index into the shape of `src`. The size of `kernel`
 // must not exceed the target dimension. `dst` should point to a buffer large enough to
-// hold the output. As a special ad-hoc optimization, if `axis == 2`, then the source
-// shape might be smaller than `Config::min_row_size`; in this case, `row_buf` must be
-// at least `Config::min_row_size + 2 * radius` elements, and the output shape should be
-// `(*src.shape[:-1], Config::min_row_size)`.
+// hold the output. As a special ad-hoc optimization, if `axis == 2` (that is, the
+// convolution is performed across the contiguous dimension), then the source shape
+// might be violate the `lane_count()` condition (input padding is fused into the
+// computation).
 void convolve(int axis, DataView3D src, KernelView kernel, float *dst, float *row_buf);
 
 // Compute the L2 norm of the input data for 2 or 3 input arrays.

@@ -84,6 +84,8 @@ public:
     operator float *() noexcept { return ptr.get(); }
     operator const float *() const noexcept { return ptr.get(); }
 
+    // Release the buffer and return a raw pointer to its contents. Callers must use
+    // `deallocate` to deallocate the pointer.
     float *release() noexcept { return ptr.release(); }
 };
 
@@ -148,6 +150,7 @@ class Filters {
         return Buffer{n_channels * buf_size};
     }
 
+    // Create an `NDArray` from the given buffer. Invalidates the buffer contents.
     NDArray into_result(Buffer &src, size_t n_channels = 1) {
         size_t shape[max_ndim + 1];
         int64_t strides[max_ndim + 1];
