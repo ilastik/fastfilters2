@@ -1,2 +1,2 @@
 CompileFlags:
-    Add: [-D__CLANGD__]
+  Add: [-D__CLANGD__]

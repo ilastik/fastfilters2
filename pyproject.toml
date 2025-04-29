@@ -62,10 +62,19 @@ addopts = "--quiet -ra --doctest-modules"
 
 [tool.cibuildwheel]
 build = "cp*"
-archs = ["auto64"]
-test-requires = ["pytest"]
-test-command = "pytest {project}/tests"
+skip = "*-musllinux_*"
+archs = "auto64"
+# In the future, cibuildwheel will switch the default backend from `pip` to `build`.
+build-frontend = "build"
+test-command = "pytest {package}/tests"
+test-requires = "pytest"
 
-# Minimum macOS version required for the complete C++17 support.
+[tool.cibuildwheel.windows]
+# Use an experimental wheel repair tool on Windows (cf. `delvewheel` and `delocate`).
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+
 [tool.cibuildwheel.macos.environment]
+# Minimum macOS version required for the complete C++17 support. On aarch64, this value
+# is bumped to `11.0` (the first macOS version with the support for Apple Silicon).
 MACOSX_DEPLOYMENT_TARGET = "10.14"
