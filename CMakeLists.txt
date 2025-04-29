@@ -58,6 +58,20 @@ target_link_libraries(_internal PRIVATE hwy simd)
 _target_cxx_standard(_internal 17)
 _target_cxx_warnings(_internal)
 
+# Add ASan, UBSan, and other debug options to the target. Works on Linux/GCC and
+# macOS/Clang. The resulting binary needs additional setup: see `scripts/debugrun.py`.
+function(_target_debug_options target)
+    target_compile_options(${target} PRIVATE
+        -O1
+        -g3
+        -fno-omit-frame-pointer
+        -fsanitize=address,undefined)
+    target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+endfunction()
+
+# _target_debug_options(_internal)
+# _target_debug_options(simd)
+
 # nanobind_add_stub(_internal_stub
 #     MODULE _internal
 #     OUTPUT _internal.pyi
