@@ -75,11 +75,15 @@ test-command = "pytest {package}/tests"
 test-requires = "pytest"
 
 [tool.cibuildwheel.windows]
-# Use an experimental wheel repair tool on Windows (cf. `delvewheel` and `delocate`).
+# Use an experimental wheel repair tool on Windows (cf. `auditwheel` and `delocate`).
 before-build = "pip install delvewheel"
 repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos.environment]
-# Minimum macOS version required for the complete C++17 support. On aarch64, this value
-# is bumped to `11.0` (the first macOS version with the support for Apple Silicon).
+# Minimum macOS version required for the complete C++17 support.
 MACOSX_DEPLOYMENT_TARGET = "10.14"
+
+[[tool.cibuildwheel.overrides]]
+# macOS on Apple Silicon requires a higher minimum deployment target.
+select = "*-macos_arm64"
+environment = {MACOSX_DEPLOYMENT_TARGET = "11.0"}
