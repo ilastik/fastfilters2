@@ -2,39 +2,45 @@
 
 > SIMD-accelerated 2D and 3D image features
 
-## Local development
+## Development
 
-The following commands use [Mambaforge][mambaforge] for installing build dependencies.
-You should also have a working, modern C++ compiler toolchain installed in your system.
+### Prerequisites
 
-```sh
-# Create and activate a local development environment.
-mamba create --name ff2dev --yes python pip cmake ninja numpy
-conda activate ff2dev
+You need the following tools installed in your system:
+- C++17 compiler toolchain
+- Python
+- CMake
 
-# Install this package in editable mode:
-# all changes in Python source code are picked up automatically.
-pip install --editable .
+Whereas installing compiler is highly platform-specific, all other dependencies could be
+obtained via [conda][conda], [mamba][mamba], or [micromamba][micromamba], which are
+largely compatible with each other.
 
-# Configure CMake build.
-cmake --preset dev
+The following instructions assume that you use micromamba.
 
-# Build and run benchmarks: this needs to be run when C++ source files change.
-cmake --build --preset dev.bm
+1. Create a new environment:
 
-# Build and install Python module: this needs to be run when C++ source files change.
-cmake --build --preset dev.install
-```
+    ```sh
+    micromamba create --yes --name fastfilters2 --strict-channel-priority --channel conda-forge --channel ilastik-forge python~=3.9.0 fastfilters
+    ```
 
-## Guides
+2. Activate the environment (remember to activate it every time in a new shell):
 
-### Add a new submodule dependency
+    ```sh
+    micromamba activate fastfilters2
+    ```
 
-```sh
-git submodule add --name REPO https://github.com/OWNER/REPO.git deps/REPO
-git -C deps/REPO switch --detach TAG
-git add .
-git commit --message
-```
+3. Install development dependencies:
 
-[mambaforge]: https://github.com/conda-forge/miniforge#mambaforge
+    ```sh
+    pip install scikit-build-core nanobind pytest imageio clang-format ruff typer rich
+    ```
+
+4. Install this package in editable mode:
+
+    ```sh
+    pip install --no-build-isolation --verbose --editable .
+    ```
+
+[conda]: https://docs.conda.io/en/latest/
+[mamba]: https://mamba.readthedocs.io/en/latest/
+[micromamba]: https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html

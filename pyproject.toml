@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools", "scikit-build"]
-build-backend = "setuptools.build_meta"
+# nanobind requires `typing-extensions` for stubgen on Python versions older than 3.11.
+requires = ["scikit-build-core", "nanobind", "typing-extensions"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "fastfilters2"
-version = "2.0.0.dev0"
+version = "2.0.0.dev1"
 description = "SIMD-accelerated 2D and 3D image features"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = { text = "MIT License" }
 authors = [
     { name = "Emil Melnikov", email = "emilmelnikov@gmail.com" },
@@ -21,9 +22,6 @@ classifiers = [
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: Microsoft",
     "Operating System :: Microsoft :: Windows",
-    "Operating System :: Microsoft :: Windows :: Windows 7",
-    "Operating System :: Microsoft :: Windows :: Windows 8",
-    "Operating System :: Microsoft :: Windows :: Windows 8.1",
     "Operating System :: Microsoft :: Windows :: Windows 10",
     "Operating System :: Microsoft :: Windows :: Windows 11",
     "Operating System :: POSIX",
@@ -32,30 +30,56 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    # "Typing :: Typed",
+    "Typing :: Typed",
 ]
 dependencies = [
-    "numpy>=1.20",
+    "numpy>=1.21",
 ]
 
 [project.urls]
 "Homepage" = "https://github.com/ilastik/fastfilters2"
 "Bug Tracker" = "https://github.com/ilastik/fastfilters2/issues"
 
+[tool.scikit-build]
+editable.rebuild = true
+build.verbose = true
+build-dir = "build/{wheel_tag}"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--quiet -ra --doctest-modules"
 
 [tool.cibuildwheel]
-build = "cp*-{macosx,manylinux,win}_{amd64,universal2,x86_64}"
-test-requires = ["pytest"]
+build = "cp*"
+skip = "*-musllinux_*"
+archs = "auto64"
+# In the future, cibuildwheel will switch the default backend from `pip` to `build`.
+build-frontend = "build"
 test-command = "pytest {package}/tests"
+test-requires = "pytest"
+
+[tool.cibuildwheel.windows]
+# Use an experimental wheel repair tool on Windows (cf. `auditwheel` and `delocate`).
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos.environment]
+# Minimum macOS version required for the complete C++17 support.
+MACOSX_DEPLOYMENT_TARGET = "10.14"
+
+[[tool.cibuildwheel.overrides]]
+# macOS on Apple Silicon requires a higher minimum deployment target.
+select = "*-macos_arm64"
+inherit.environment = "append"
+environment.MACOSX_DEPLOYMENT_TARGET = "11.0"

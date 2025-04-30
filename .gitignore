@@ -1,6 +1,6 @@
 __pycache__/
-*.egg-info/
-/.pytest_cache/
+.pytest_cache/
+/_deps/
 /build/
 /dist/
-/src/**/*.so
+/python/fastfilters2/_version.py

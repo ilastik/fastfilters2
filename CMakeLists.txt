@@ -1,46 +1,87 @@
-cmake_minimum_required(VERSION 3.19...3.25)
+cmake_minimum_required(VERSION 3.18)
 project(fastfilters2 LANGUAGES CXX)
 
-set(CMAKE_BUILD_TYPE Release)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# Enable compiler-specific warnings for the target.
+function(_target_cxx_warnings target)
+    target_compile_options(${target} PRIVATE
+        $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:-Wall -Wextra -Wpedantic -Wfloat-conversion>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->)
+endfunction()
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+# Set the C++ standard for the target.
+function(_target_cxx_standard target std)
+    set_property(TARGET ${target} PROPERTY
+        CXX_STANDARD ${std}
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF)
+endfunction()
 
-option(FASTFILTERS2_BENCHMARK "Build benchmarks")
+# Generate `compile_commands.json` for clangd and other development tools.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "")
-set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "")
-set(BUILD_TESTING OFF CACHE BOOL "")
-set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "")
+# Configure CMake to perform an optimized release build by default unless another build
+# type is specified. Optimized builds are very important for performance-critical code.
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
+
+set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/_deps)
+include(FetchContent)
+
+# Configure Highway
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "")
+set(HWY_ENABLE_TESTS OFF CACHE BOOL "")
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "")
+FetchContent_Declare(
+    highway
+    GIT_REPOSITORY https://github.com/google/highway.git
+    GIT_TAG 400fbf20f2e40b984be129b88f83d4748cfc26a0
+)
+FetchContent_MakeAvailable(highway)
 
-if(${FASTFILTERS2_BENCHMARK})
-    add_subdirectory(deps/benchmark)
-endif()
-add_subdirectory(deps/highway)
-add_subdirectory(deps/pybind11)
+find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(nanobind CONFIG REQUIRED)
 
-add_library(fastfilters2 cpp/fastfilters2.cpp)
-target_link_libraries(fastfilters2 PRIVATE hwy)
-target_include_directories(fastfilters2 PUBLIC cpp)
+add_library(simd cpp/simd.cpp)
+target_include_directories(simd PRIVATE cpp)
+target_link_libraries(simd PRIVATE hwy hwy_contrib)
+set_property(TARGET simd PROPERTY POSITION_INDEPENDENT_CODE ON)
+_target_cxx_standard(simd 17)
+_target_cxx_warnings(simd)
 
-pybind11_add_module(_core cpp/_core.cpp)
-target_link_libraries(_core PRIVATE fastfilters2)
-install(TARGETS _core DESTINATION fastfilters2)
+# Save x86 assembly listings in the build directory (GCC-compatible compilers).
+# target_compile_options(simd PRIVATE -save-temps=obj -masm=intel -fverbose-asm)
 
-if(FASTFILTERS2_BENCHMARK)
-    add_executable(bm cpp/benchmark.cpp)
-    target_link_libraries(bm PRIVATE fastfilters2 benchmark::benchmark)
-    add_custom_target(
-        runbm
-        "$<TARGET_FILE:bm>"
-        DEPENDS bm
-        WORKING_DIRECTORY ${bm_BINARY_DIR}
-        VERBATIM
-        USES_TERMINAL
-        COMMAND_EXPAND_LISTS
-    )
-endif()
+nanobind_add_module(_internal cpp/module.cpp)
+target_link_libraries(_internal PRIVATE hwy simd)
+_target_cxx_standard(_internal 17)
+_target_cxx_warnings(_internal)
+
+# Add ASan, UBSan, and other debug options to the target. Works on Linux/GCC and
+# macOS/Clang. The resulting binary needs additional setup: see `scripts/debugrun.py`.
+function(_target_debug_options target)
+    target_compile_options(${target} PRIVATE
+        -O1
+        -g3
+        -fno-omit-frame-pointer
+        -fsanitize=address,undefined)
+    target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+endfunction()
+
+# _target_debug_options(_internal)
+# _target_debug_options(simd)
+
+# nanobind_add_stub(_internal_stub
+#     MODULE _internal
+#     OUTPUT _internal.pyi
+#     PYTHON_PATH $<TARGET_FILE_DIR:_internal>/fastfilters2
+#     DEPENDS _internal
+#     VERBOSE
+#     MARKER_FILE py.typed)
+
+install(TARGETS _internal LIBRARY DESTINATION fastfilters2)
+# install(FILES
+#     $<TARGET_FILE_DIR:_internal>/py.typed
+#     $<TARGET_FILE_DIR:_internal>/_internal.pyi
+#     DESTINATION fastfilters2)
