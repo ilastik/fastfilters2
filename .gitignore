@@ -3,3 +3,4 @@ __pycache__/
 /_deps/
 /build/
 /dist/
+/python/fastfilters2/_version.py
